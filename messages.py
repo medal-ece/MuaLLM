@@ -5,4 +5,4 @@ system_message1= [(
 
         """,
     ),
-    ("human", "How can I better design an RC circuit?"),]
+    ("human", "How can I better design an RC circuit as mentioned in the doc?"),]
