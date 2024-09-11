@@ -8,3 +8,4 @@ chromadb
 tiktoken
 pypdf
 python-dotenv
+rapidocr-onnxruntime
