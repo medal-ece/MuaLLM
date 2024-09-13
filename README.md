@@ -4,6 +4,12 @@ RAG on electronic circuits
 
 # Project Setup and Usage Guide
 
+clone repository using the following command
+'''
+git clone https://github.com/pravallika10473/RAG_research.git
+
+'''
+
 ## How to Run the Project
 
 ### 1. Create a `papers` Directory
