@@ -13,7 +13,7 @@ git clone https://github.com/pravallika10473/RAG_research.git
 The project is organized into different directories for various models:
 
 - `claude/`: Contains scripts for Claude models
-- `openai/`: Contains scripts for OpenAI models (if applicable)
+- `gpt/`: Contains scripts for GPT models
 - `papers/`: Directory to store your PDF files for testing
 
 ## How to Run the Project
