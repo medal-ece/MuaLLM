@@ -8,10 +8,20 @@ clone repository using the following command
 ```
 git clone https://github.com/pravallika10473/RAG_research.git
 ```
+## Project Structure
+
+The project is organized into different directories for various models:
+
+- `claude/`: Contains scripts for Claude models
+- `openai/`: Contains scripts for OpenAI models (if applicable)
+- `papers/`: Directory to store your PDF files for testing
+
 ## How to Run the Project
 
-### 1. Create a `papers` Directory
-In the root directory of your project, create a folder named `papers` and place all the PDF files you want to test in this folder. For example:
+### 1. Prepare Your Papers
+
+Place all the PDF files you want to test in the `papers` directory at the root of the project. For example:
+
 ```
 papers/paper1.pdf
 papers/paper2.pdf
@@ -31,21 +41,42 @@ LANGCHAIN_API_KEY=""
 ANTHROPIC_API_KEY=""
 ```
 
-### 4. Build the Database
-To build the database from the PDF files in the `papers` directory, run the following command and specify the files you want to include:
+### 4. Using Claude Models
+
+To use the Claude models, navigate to the `claude` directory:
+
 ```
-python semantic_search_anthropic.py --build "papers/paper1.pdf" "papers/paper2.pdf" "papers/paper3.pdf" ...
+cd claude
 ```
 
-### 5. Query the System
+#### Build the Database
+
+To build the database from the PDF files in the `papers` directory, run:
+
+```
+python keyword_rag_anthropic.py --build ../papers
+```
+
+This will process all PDF files in the `papers` directory.
+
+#### Query the System
+
 Once the database is built, you can query the system using one of the following commands:
 
 - For semantic search:
-  ```
-  python semantic_search_anthropic.py --query "What is the equation of Voltage Reference VREF"
+  ```bash
+  python semantic_search_anthropic.py --query "Your query here"
   ```
 
 - For keyword-based search:
+  ```bash
+  python keyword_rag_anthropic.py --query "Your query here"
   ```
-  python keyword_rag_anthropic.py --query "What is the equation of Voltage Reference VREF"
-  ```
+
+### 5. Using Other Models
+
+If you want to use other models (e.g., OpenAI), navigate to their respective directories and follow similar steps for building the database and querying the system.
+
+## Note
+
+Make sure you're in the correct directory (e.g., `claude`) when running the scripts. The paths to the `papers` directory and other resources are relative to the script's location.
