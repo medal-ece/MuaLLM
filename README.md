@@ -30,7 +30,7 @@ ANTHROPIC_API_KEY=""
 ### 4. Build the Database
 To build the database from the PDF files in the `papers` directory, run the following command and specify the files you want to include:
 ```
-python rag.py --build "papers/paper1.pdf" "papers/paper2.pdf" "papers/paper3.pdf" ...
+python semantic_search_anthropic.py --build "papers/paper1.pdf" "papers/paper2.pdf" "papers/paper3.pdf" ...
 ```
 
 ### 5. Query the System
