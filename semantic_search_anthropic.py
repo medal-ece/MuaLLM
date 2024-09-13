@@ -1,4 +1,5 @@
 import argparse
+from langchain import hub
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_core.output_parsers import StrOutputParser
@@ -8,15 +9,15 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import openai
 import os
 from dotenv import load_dotenv
+from messages import system_message1
 from langchain_core.prompts import ChatPromptTemplate
 
-# Load environment variables and set up OpenAI API key
 load_dotenv()
-openai.api_key = os.getenv('OPENAI_API_KEY')
+os.environ["ANTHROPIC_API_KEY"] = os.getenv('ANTHROPIC_API_KEY')
 
-# Initialize the OpenAI LLM model
-llm = ChatOpenAI(model="gpt-4")
+from langchain_anthropic import ChatAnthropic
 
+llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
 # Constants
 PERSIST_DIRECTORY = "chroma_db"
 CHUNK_SIZE = 1000

@@ -1,4 +1,7 @@
+import getpass
+import os
 import argparse
+from langchain import hub
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_core.output_parsers import StrOutputParser
@@ -8,14 +11,16 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import openai
 import os
 from dotenv import load_dotenv
+from messages import system_message1
 from langchain_core.prompts import ChatPromptTemplate
-
-# Load environment variables and set up OpenAI API key
 load_dotenv()
-openai.api_key = os.getenv('OPENAI_API_KEY')
+os.environ["ANTHROPIC_API_KEY"] = os.getenv('ANTHROPIC_API_KEY')
 
-# Initialize the OpenAI LLM model
-llm = ChatOpenAI(model="gpt-4")
+from langchain_anthropic import ChatAnthropic
+
+llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+messages = system_message1
+llm.invoke(messages)
 
 # Constants
 PERSIST_DIRECTORY = "chroma_db"
@@ -53,64 +58,46 @@ def build_database(doc_paths):
 
     print(f"Database updated and saved to {PERSIST_DIRECTORY}")
 
-def semantic_search(query_text, top_k=5):
+def query_database(query_text):
     embedding = OpenAIEmbeddings()
     vectorstore = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embedding)
     
-    # Perform semantic search
-    results = vectorstore.similarity_search_with_score(query_text, k=top_k)
-    
-    # Format and return results
-    formatted_results = []
-    for doc, score in results:
-        formatted_results.append({
-            "content": doc.page_content,
-            "metadata": doc.metadata,
-            "similarity_score": score
-        })
-    
-    return formatted_results
+    retriever = vectorstore.as_retriever()
 
-def query_database(query_text):
-    # Perform semantic search
-    search_results = semantic_search(query_text)
-    
     # Define a custom RAG prompt template
-    template = """Answer the question based on the following context:
+    template = """Answer the question based only on the following context:
     {context}
 
     Question: {question}
-
-    Also provide a brief explanation of how you arrived at this answer based on the given context.
 
     Answer:"""
     prompt = ChatPromptTemplate.from_template(template)
 
     def format_docs(docs):
-        return "\n\n".join(f"Content: {doc['content']}\nMetadata: {doc['metadata']}\nSimilarity Score: {doc['similarity_score']}" for doc in docs)
+        return "\n\n".join(doc.page_content for doc in docs)
 
-    context = format_docs(search_results)
-    
+    print(f"Search keyword: {query_text}")
+
+    def retrieve_and_debug(query):
+        docs = retriever.invoke(query)
+        context = format_docs(docs)
+        with open("context.txt", "w") as f:
+            f.write(context)
+        return context
+
     rag_chain = (
-        {"context": lambda _: context, "question": RunnablePassthrough()}
+        {"context": retrieve_and_debug, "question": RunnablePassthrough()}
         | prompt
         | llm
         | StrOutputParser()
     )
 
     output = rag_chain.invoke(query_text)
-    print("Search Results:")
-    for i, result in enumerate(search_results, 1):
-        print(f"{i}. Similarity Score: {result['similarity_score']}")
-        print(f"   Content: {result['content'][:100]}...")
-        print(f"   Metadata: {result['metadata']}")
-        print()
-    
     print("Final answer:")
     print(output)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build and query a semantic search RAG database from local documents.")
+    parser = argparse.ArgumentParser(description="Build and query a RAG database from local documents.")
     parser.add_argument("--build", nargs='+', help="Build the database with the specified PDF files or directories")
     parser.add_argument("--query", type=str, help="Query the existing database")
     args = parser.parse_args()
@@ -121,3 +108,4 @@ if __name__ == "__main__":
         query_database(args.query)
     else:
         print("Please specify either --build or --query")
+
