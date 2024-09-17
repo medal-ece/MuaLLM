@@ -4,4 +4,6 @@ context.txt
 chroma_db
 semantic_search_db
 jupyter/
-
+docs/
+__pycache__
+figures/

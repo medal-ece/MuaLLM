@@ -9,3 +9,14 @@ tiktoken
 pypdf
 python-dotenv
 rapidocr-onnxruntime
+pdf2image
+unstructured
+pillow
+pydantic
+lxml
+matplotlib
+tiktoken
+open_clip_torch
+torch
+brew install tesseract
+brew install poppler

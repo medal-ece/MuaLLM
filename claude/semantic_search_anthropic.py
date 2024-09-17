@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
@@ -9,6 +10,10 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
+
+
+# Import the system message
+from messages import system_message1
 
 # Load environment variables
 load_dotenv()
@@ -21,6 +26,9 @@ CHUNK_OVERLAP = 200
 
 # Initialize LLM
 llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+
+# Apply the system message
+llm.invoke(system_message1)
 
 def build_database(doc_paths):
     embedding = OpenAIEmbeddings()
