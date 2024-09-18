@@ -23,8 +23,8 @@ load_dotenv()
 from messages import system_message1
 
 IMAGE_PATH = "figures"
-COLLECTION_NAME = "paper1"
-DB_PATH = "multimodal_vectorstore"
+COLLECTION_NAME = "jetty"
+DB_PATH = "option1_multimodal_vectorstore"
 
 def extract_pdf_elements(filename: str) -> List[Any]:
     return partition_pdf(
@@ -158,7 +158,7 @@ def main():
         for i, doc in enumerate(docs, 1):
             f.write(f"Result {i}:\n")
             if is_base64(doc.page_content):
-                img_filename = f"image_{i}.jpg"
+                img_filename = f"context_image_{i}.jpg"
                 img_path = os.path.join(os.path.dirname(args.output_path), img_filename)
                 with open(img_path, "wb") as img_file:
                     img_file.write(base64.b64decode(doc.page_content))
@@ -167,7 +167,8 @@ def main():
                 f.write(f"{doc.page_content}\n\n")
 
     print(f"Results have been written to {args.output_path}")
-    chain.invoke(args.query)
+    response = chain.invoke(args.query)
+    print(response)
 
 if __name__ == "__main__":
     main()
