@@ -7,3 +7,5 @@ jupyter/
 docs/
 __pycache__
 figures/
+multimodal_vectorstore
+results/
