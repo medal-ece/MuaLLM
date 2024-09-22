@@ -34,6 +34,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from PIL import Image
 
 path = "option3_images"
+DB_PATH = "option3_db"
 
 def extract_pdf_elements(input):
     """
@@ -42,7 +43,7 @@ def extract_pdf_elements(input):
     """
     return partition_pdf(
         filename=input,
-        extract_images_in_pdf=False,
+        extract_images_in_pdf=True,
         infer_table_structure=True,
         chunking_strategy="by_title",
         max_characters=4000,
@@ -65,7 +66,7 @@ def categorize_elements(raw_pdf_elements):
             texts.append(str(element))
     return texts, tables
 
-def generate_text_summaries(texts, tables, summarize_texts=False):
+def generate_text_summaries(texts, tables, summarize_texts=True):
     """
     Summarize text elements
     texts: List of str
@@ -77,7 +78,7 @@ def generate_text_summaries(texts, tables, summarize_texts=False):
     Give a concise summary of the table or text that is well optimized for retrieval. Table or text: {element} """
     prompt = ChatPromptTemplate.from_template(prompt_text)
 
-    model = ChatOpenAI(temperature=0, model="gpt-4")
+    model = ChatOpenAI(temperature=0, model="gpt-4o")
     summarize_chain = {"element": lambda x: x} | prompt | model | StrOutputParser()
 
     text_summaries = []
@@ -100,7 +101,7 @@ def encode_image(image_path):
 
 def image_summarize(img_base64, prompt):
     """Make image summary"""
-    chat = ChatOpenAI(model="gpt-4-vision-preview", max_tokens=1024)
+    chat = ChatOpenAI(model="gpt-4o", max_tokens=1024)
 
     msg = chat.invoke(
         [
@@ -138,6 +139,13 @@ def generate_img_summaries(path):
 
     return img_base64_list, image_summaries
 
+def setup_vectorstore():
+    return Chroma(
+        collection_name="option3_vectorstore",
+        embedding_function=OpenAIEmbeddings(),
+        persist_directory=DB_PATH
+    )
+
 def create_multi_vector_retriever(
     vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images
 ):
@@ -169,6 +177,7 @@ def create_multi_vector_retriever(
     if image_summaries:
         add_documents(retriever, image_summaries, images)
 
+    # retriever.vectorstore.persist()  # Persist the changes to disk
     return retriever
 
 def plt_img_base64(img_base64):
@@ -260,7 +269,7 @@ def multi_modal_rag_chain(retriever):
     """
     Multi-modal RAG chain
     """
-    model = ChatOpenAI(temperature=0, model="gpt-4-vision-preview", max_tokens=1024)
+    model = ChatOpenAI(temperature=0, model="gpt-4o", max_tokens=1024)
 
     chain = (
         {
@@ -274,40 +283,45 @@ def multi_modal_rag_chain(retriever):
 
     return chain
 
-def main(input=None, query=None):
-    if input:
-        raw_pdf_elements = extract_pdf_elements(input)
+def main(input_file: str, query: str):
+    if not os.path.exists(DB_PATH):
+        os.makedirs(DB_PATH)
+
+    vectorstore = setup_vectorstore()
+
+    if input_file:
+        raw_pdf_elements = extract_pdf_elements(input_file)
         texts, tables = categorize_elements(raw_pdf_elements)
         text_summaries, table_summaries = generate_text_summaries(
             texts, tables, summarize_texts=True
         )
         img_base64_list, image_summaries = generate_img_summaries(path)
 
-        vectorstore = Chroma(
-            collection_name="option3_vectorstore",
-            embedding_function=OpenAIEmbeddings()
-        )
-
         retriever = create_multi_vector_retriever(
             vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
         )
+        print(f"Added new content from {input_file} to the database.")
     else:
-        print("Error: Input file is required.")
-        return
+        print("No input file provided. Using existing database.")
+        retriever = MultiVectorRetriever(
+            vectorstore=vectorstore,
+            docstore=InMemoryStore(),
+            id_key="doc_id",
+        )
 
     chain_multimodal_rag = multi_modal_rag_chain(retriever)
-    
+    print(chain_multimodal_rag.invoke({"question": query}))
     if query:
+        print(chain_multimodal_rag.invoke({"question": query}))
         docs = retriever.invoke(query, limit=6)
 
         with open("results/option3_context.txt", 'w') as f:
             f.write(f"Query: {query}\n\n")
-            #write the context to the file
             f.write(f"Context: {docs}\n\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", help="Path to the PDF file", required=True)
+    parser.add_argument("--input", help="Path to the PDF file", required=False)
     parser.add_argument("--query", help="Query to search for", required=True)
     args = parser.parse_args()
 
