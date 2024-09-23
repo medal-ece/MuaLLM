@@ -1,7 +1,7 @@
 """
 We will use Unstructured to parse images, text, and tables from documents (PDFs).
 We will use the multi-vector retriever with Chroma to store raw text and images along with their summaries for retrieval.
-We will use GPT-4V for both image summarization (for retrieval) as well as final answer synthesis from join retrieval of images and text (or tables).
+We will use GPT-4o for both image summarization (for retrieval) as well as final answer synthesis from join retrieval of images and text (or tables).
 """
 
 import argparse
@@ -296,28 +296,46 @@ def main(input_file: str, query: str):
             texts, tables, summarize_texts=True
         )
         img_base64_list, image_summaries = generate_img_summaries(path)
-
         retriever = create_multi_vector_retriever(
             vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
         )
         print(f"Added new content from {input_file} to the database.")
     else:
         print("No input file provided. Using existing database.")
-        retriever = MultiVectorRetriever(
-            vectorstore=vectorstore,
-            docstore=InMemoryStore(),
-            id_key="doc_id",
+        retriever = create_multi_vector_retriever(
+            vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
         )
 
     chain_multimodal_rag = multi_modal_rag_chain(retriever)
-    print(chain_multimodal_rag.invoke({"question": query}))
     if query:
-        print(chain_multimodal_rag.invoke({"question": query}))
+        result = chain_multimodal_rag.invoke(query)
+        print(result)
         docs = retriever.invoke(query, limit=6)
 
-        with open("results/option3_context.txt", 'w') as f:
+        # Ensure results directory exists
+        if not os.path.exists("results"):
+            os.makedirs("results")
+
+        # Save context details to file
+        with open("results/option3_context_details.txt", 'w') as f:
             f.write(f"Query: {query}\n\n")
-            f.write(f"Context: {docs}\n\n")
+            f.write(f"Answer: {result}\n\n")
+            f.write("Context Used:\n")
+            
+            for i, doc in enumerate(docs):
+                if isinstance(doc, Document):
+                    content = doc.page_content
+                else:
+                    content = doc
+                
+                if looks_like_base64(content) and is_image_data(content):
+                    f.write(f"Image {i+1} used in context\n")
+                    # Save image
+                    img_data = base64.b64decode(content)
+                    img = Image.open(io.BytesIO(img_data))
+                    img.save(f"results/context_image_{i+1}.jpg")
+                else:
+                    f.write(f"Text {i+1}: {content}\n\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
