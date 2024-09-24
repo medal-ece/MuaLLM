@@ -1,9 +1,15 @@
+"""
+We will use Unstructured to parse images, text, and tables from documents (PDFs).
+We will use the multi-vector retriever with Chroma to store raw text and images along with their summaries for retrieval.
+We will use GPT-4o for both image summarization (for retrieval) as well as final answer synthesis from join retrieval of images and text (or tables).
+"""
+
 import argparse
 from langchain_text_splitters import CharacterTextSplitter
 from unstructured.partition.pdf import partition_pdf
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI
 
 import base64
 import os
@@ -18,6 +24,7 @@ from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.storage import InMemoryStore
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
+from langchain_openai import OpenAIEmbeddings
 
 import io
 import re
@@ -133,21 +140,11 @@ def generate_img_summaries(path):
     return img_base64_list, image_summaries
 
 def setup_vectorstore():
-    if os.path.exists(DB_PATH) and os.listdir(DB_PATH):
-        # Load existing vectorstore
-        return Chroma(
-            collection_name="option3_vectorstore",
-            embedding_function=OpenAIEmbeddings(),
-            persist_directory=DB_PATH
-        )
-    else:
-        # Create new vectorstore
-        return Chroma.from_documents(
-            documents=[],  # Start with an empty collection
-            embedding=OpenAIEmbeddings(),
-            persist_directory=DB_PATH,
-            collection_name="option3_vectorstore"
-        )
+    return Chroma(
+        collection_name="option3_vectorstore",
+        embedding_function=OpenAIEmbeddings(),
+        persist_directory=DB_PATH
+    )
 
 def create_multi_vector_retriever(
     vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images
@@ -155,7 +152,6 @@ def create_multi_vector_retriever(
     """
     Create retriever that indexes summaries, but returns raw images or texts
     """
-    # persist the vectorstore
     store = InMemoryStore()
     id_key = "doc_id"
 
@@ -181,10 +177,11 @@ def create_multi_vector_retriever(
     if image_summaries:
         add_documents(retriever, image_summaries, images)
 
+    # retriever.vectorstore.persist()  # Persist the changes to disk
     return retriever
 
 def plt_img_base64(img_base64):
-    """Display base64 encoded string as image"""
+    """Disply base64 encoded string as image"""
     image_html = f'<img src="data:image/jpeg;base64,{img_base64}" />'
     display(HTML(image_html))
 
@@ -295,23 +292,47 @@ def main(input_file: str, query: str):
     if input_file:
         raw_pdf_elements = extract_pdf_elements(input_file)
         texts, tables = categorize_elements(raw_pdf_elements)
+        # write text and tables to a file
+        with open("results/option3_text_tables.txt", 'w') as f:
+            f.write("Texts:\n")
+            for text in texts:
+                f.write(text + "\n\n")
+            f.write("Tables:\n")
+            for table in tables:
+                f.write(table + "\n\n")
         text_summaries, table_summaries = generate_text_summaries(
-            texts, tables, summarize_texts=False
+            texts, tables, summarize_texts=True
         )
+        # write text summaries and table summaries to a file
+        with open("results/option3_text_summaries.txt", 'w') as f:
+            f.write("Text Summaries:\n")
+            for summary in text_summaries:
+                f.write(summary + "\n\n")
+            f.write("Table Summaries:\n")
+            for summary in table_summaries:
+                f.write(summary + "\n\n")
         img_base64_list, image_summaries = generate_img_summaries(path)
+        # write image summaries to a file
+        with open("results/option3_image_summaries.txt", 'w') as f:
+            f.write("Image Summaries:\n")
+            for summary in image_summaries:
+                f.write(summary + "\n\n")
         retriever = create_multi_vector_retriever(
             vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
         )
         print(f"Added new content from {input_file} to the database.")
     else:
         print("No input file provided. Using existing database.")
-        retriever = vectorstore.as_retriever()
+        retriever = create_multi_vector_retriever(
+            vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
+        )
 
     chain_multimodal_rag = multi_modal_rag_chain(retriever)
     if query:
+        
+        docs = retriever.invoke(query, limit=6)
         result = chain_multimodal_rag.invoke(query)
         print(result)
-        docs = retriever.invoke(query)
 
         # Ensure results directory exists
         if not os.path.exists("results"):
