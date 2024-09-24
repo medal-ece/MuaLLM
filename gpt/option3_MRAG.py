@@ -34,7 +34,7 @@ from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from PIL import Image
 
 from unstructured.documents.elements import Image as UnstructuredImage, Text
-from typing import List, Any
+from typing import List, Any, Tuple
 
 path = "option3_images"
 DB_PATH = "option3_db"
@@ -69,7 +69,7 @@ def categorize_elements(raw_pdf_elements):
             texts.append(str(element))
     return texts, tables
 
-def extract_image_captions(raw_pdf_elements):
+def extract_image_captions(raw_pdf_elements) -> List[Tuple[str, str]]:
     """
     Extract image captions from PDF elements.
     
@@ -77,18 +77,19 @@ def extract_image_captions(raw_pdf_elements):
     raw_pdf_elements (list): List of elements extracted from the PDF.
     
     Returns:
-    list: List of image captions.
+    list: List of tuples containing figure numbers and their captions.
     """
     image_captions = []
-    caption_pattern = re.compile(r'(figure|fig\.?|image|table|diagram)\s*\d+\.?\s*([^.]*\.)', re.IGNORECASE)
+    caption_pattern = re.compile(r'(figure|fig\.?|image|table|diagram)\s*(\d+)\.?\s*([^.]*\.)', re.IGNORECASE)
     
     for element in raw_pdf_elements:
         if hasattr(element, 'text'):
             text = element.text.strip()
             match = caption_pattern.search(text)
             if match:
+                figure_num = match.group(2)
                 caption = match.group(0)
-                image_captions.append(f"Image Caption: {caption}")
+                image_captions.append((f"Figure {figure_num}", caption))
     
     return image_captions
 
@@ -144,24 +145,33 @@ def image_summarize(img_base64, prompt):
     )
     return msg.content
 
-def generate_img_summaries(path):
+def generate_img_summaries(path, image_captions):
     """
     Generate summaries and base64 encoded strings for images
     path: Path to list of .jpg files extracted by Unstructured
+    image_captions: List of tuples containing figure numbers and their captions
     """
     img_base64_list = []
     image_summaries = []
 
-    prompt = """You are an assistant tasked with summarizing images for retrieval. \
-    These summaries will be embedded and used to retrieve the raw image. \
-    Give a concise summary of the image that is well optimized for retrieval."""
+    prompt = """You are an assistant tasked with summarizing images for retrieval. 
+    These summaries will be embedded and used to retrieve the raw image. 
+    Give a concise summary of the image that is well optimized for retrieval. 
+    Include the figure number and caption in your summary."""
 
-    for img_file in sorted(os.listdir(path)):
+    for i, img_file in enumerate(sorted(os.listdir(path))):
         if img_file.endswith(".jpg"):
             img_path = os.path.join(path, img_file)
             base64_image = encode_image(img_path)
             img_base64_list.append(base64_image)
-            image_summaries.append(image_summarize(base64_image, prompt))
+            
+            # Get the corresponding caption if available
+            figure_num, caption = image_captions[i] if i < len(image_captions) else (f"Figure {i+1}", "No caption available")
+            
+            # Include the figure number and caption in the prompt
+            figure_prompt = f"{figure_num}: {caption}\n{prompt}"
+            summary = image_summarize(base64_image, figure_prompt)
+            image_summaries.append(f"{figure_num}: {caption}\n{summary}")
 
     return img_base64_list, image_summaries
 
@@ -203,7 +213,6 @@ def create_multi_vector_retriever(
     if image_summaries:
         add_documents(retriever, image_summaries, images)
 
-    # retriever.vectorstore.persist()  # Persist the changes to disk
     return retriever
 
 def plt_img_base64(img_base64):
@@ -319,10 +328,11 @@ def main(input_file: str, query: str):
         raw_pdf_elements = extract_pdf_elements(input_file)
         texts, tables = categorize_elements(raw_pdf_elements)
         image_captions = extract_image_captions(raw_pdf_elements)
+        
         # Print extracted captions for debugging
         print("Extracted Image Captions:")
-        for caption in image_captions:
-            print(caption)
+        for figure_num, caption in image_captions:
+            print(f"{figure_num}: {caption}")
         
         # write text, tables, and image captions to a file
         with open("results/option3_text_tables_captions.txt", 'w') as f:
@@ -333,8 +343,8 @@ def main(input_file: str, query: str):
             for table in tables:
                 f.write(table + "\n\n")
             f.write("Image Captions:\n")
-            for caption in image_captions:
-                f.write(caption + "\n\n")
+            for figure_num, caption in image_captions:
+                f.write(f"{figure_num}: {caption}\n\n")
         
         text_summaries, table_summaries = generate_text_summaries(
             texts, tables, summarize_texts=False
@@ -349,13 +359,13 @@ def main(input_file: str, query: str):
             for summary in table_summaries:
                 f.write(summary + "\n\n")
         
-        img_base64_list, image_summaries = generate_img_summaries(path)
+        img_base64_list, image_summaries = generate_img_summaries(path, image_captions)
         
         # write image summaries to a file
         with open("results/option3_image_summaries.txt", 'w') as f:
             f.write("Image Summaries:\n")
             for summary in image_summaries:
-                f.write(summary + "\n\n")
+                f.write(f"{summary}\n\n")
         
         retriever = create_multi_vector_retriever(
             vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
@@ -369,7 +379,6 @@ def main(input_file: str, query: str):
 
     chain_multimodal_rag = multi_modal_rag_chain(retriever)
     if query:
-        
         docs = retriever.invoke(query, limit=6)
         result = chain_multimodal_rag.invoke(query)
         print(result)
