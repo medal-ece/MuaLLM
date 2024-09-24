@@ -33,6 +33,9 @@ from IPython.display import HTML, display
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 from PIL import Image
 
+from unstructured.documents.elements import Image as UnstructuredImage, Text
+from typing import List, Any
+
 path = "option3_images"
 DB_PATH = "option3_db"
 
@@ -65,6 +68,29 @@ def categorize_elements(raw_pdf_elements):
         elif "unstructured.documents.elements.CompositeElement" in str(type(element)):
             texts.append(str(element))
     return texts, tables
+
+def extract_image_captions(raw_pdf_elements):
+    """
+    Extract image captions from PDF elements.
+    
+    Args:
+    raw_pdf_elements (list): List of elements extracted from the PDF.
+    
+    Returns:
+    list: List of image captions.
+    """
+    image_captions = []
+    caption_pattern = re.compile(r'(figure|fig\.?|image|table|diagram)\s*\d+\.?\s*([^.]*\.)', re.IGNORECASE)
+    
+    for element in raw_pdf_elements:
+        if hasattr(element, 'text'):
+            text = element.text.strip()
+            match = caption_pattern.search(text)
+            if match:
+                caption = match.group(0)
+                image_captions.append(f"Image Caption: {caption}")
+    
+    return image_captions
 
 def generate_text_summaries(texts, tables, summarize_texts=True):
     """
@@ -292,31 +318,45 @@ def main(input_file: str, query: str):
     if input_file:
         raw_pdf_elements = extract_pdf_elements(input_file)
         texts, tables = categorize_elements(raw_pdf_elements)
-        # write text and tables to a file
-        with open("results/option3_text_tables.txt", 'w') as f:
+        image_captions = extract_image_captions(raw_pdf_elements)
+        # Print extracted captions for debugging
+        print("Extracted Image Captions:")
+        for caption in image_captions:
+            print(caption)
+        
+        # write text, tables, and image captions to a file
+        with open("results/option3_text_tables_captions.txt", 'w') as f:
             f.write("Texts:\n")
             for text in texts:
                 f.write(text + "\n\n")
             f.write("Tables:\n")
             for table in tables:
                 f.write(table + "\n\n")
+            f.write("Image Captions:\n")
+            for caption in image_captions:
+                f.write(caption + "\n\n")
+        
         text_summaries, table_summaries = generate_text_summaries(
-            texts, tables, summarize_texts=True
+            texts, tables, summarize_texts=False
         )
+        
         # write text summaries and table summaries to a file
         with open("results/option3_text_summaries.txt", 'w') as f:
-            f.write("Text Summaries:\n")
+            f.write("Text and Caption Summaries:\n")
             for summary in text_summaries:
                 f.write(summary + "\n\n")
             f.write("Table Summaries:\n")
             for summary in table_summaries:
                 f.write(summary + "\n\n")
+        
         img_base64_list, image_summaries = generate_img_summaries(path)
+        
         # write image summaries to a file
         with open("results/option3_image_summaries.txt", 'w') as f:
             f.write("Image Summaries:\n")
             for summary in image_summaries:
                 f.write(summary + "\n\n")
+        
         retriever = create_multi_vector_retriever(
             vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
         )
