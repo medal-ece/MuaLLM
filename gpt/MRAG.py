@@ -38,9 +38,10 @@ def parse_segments(segments_file):
         segments = json.load(f)
     return segments
 
-def find_caption(segments, image_segment, max_distance=5):
+def find_caption(segments, image_segment, docs, max_distance=5):
     image_index = image_segment['index']
     image_page = image_segment['page_number']
+    image_coords = image_segment['coordinates']
     
     for i in range(image_index + 1, min(image_index + 1 + max_distance, len(segments))):
         segment = segments[i]
@@ -49,13 +50,14 @@ def find_caption(segments, image_segment, max_distance=5):
         
         if segment['category'] in ['Text', 'Title', 'NarrativeText', "UncategorizedText"]:
             text = next((d.page_content for d in docs if d.metadata.get("index") == i), None)
-            if text.lower().startswith(('fig', 'figure')):
-                return text
-
+            if text and text.lower().startswith(('fig', 'figure')):
+                # Check if the text is below the image
+                if segment['coordinates']['points'][0][1] > image_coords['points'][1][1]:
+                    return text
     
     return ''  # Return empty string if no suitable caption is found
 
-def extract_unique_images_with_captions(pdf_path, segments):
+def extract_unique_images_with_captions(pdf_path, segments, docs):
     doc = fitz.open(pdf_path)
     figure_count = 1
     unique_images = set()
@@ -89,10 +91,10 @@ def extract_unique_images_with_captions(pdf_path, segments):
                 image.save(os.path.join(path, image_filename))
                 
                 # Find and store the caption
-                caption = find_caption(segments, segment)
+                caption = find_caption(segments, segment, docs)
                 image_captions[image_filename] = caption
                 
-                print(f"Saved {image_filename}")
+                print(f"Saved {image_filename} with caption: {caption[:50]}...")  # Print first 50 chars of caption
                 figure_count += 1
     
     doc.close()
@@ -103,12 +105,15 @@ def extract_unique_images_with_captions(pdf_path, segments):
     
     return figure_count - 1  # Return the number of unique images extracted
 
-def print_unique_categories(segments):
-    categories = set(segment['category'] for segment in segments if 'category' in segment)
-    print("Unique categories found in segments.txt:")
-    for category in sorted(categories):
-        print(f"- {category}")
-    print()  # Add a blank line for better readability
+#extract tables
+def extract_tables(docs):
+    for doc in docs:
+        if doc.metadata.get("category") == "Table":
+            # write the table to a csv file
+            with open(os.path.join(path, 'tables.csv'), 'w') as f:
+                f.write(doc.page_content)
+    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -126,10 +131,10 @@ if __name__ == "__main__":
     # Write segments to file
     write_segments_to_file(segments)
     
-    # Print unique categories
-    print_unique_categories(segments)
-    
     # Extract and save unique images with captions
-    num_unique_images = extract_unique_images_with_captions(pdf_file, segments)
+    num_unique_images = extract_unique_images_with_captions(pdf_file, segments, docs)
     
     print(f"{num_unique_images} unique images have been extracted and saved with their captions.")
+
+    # Extract tables
+    extract_tables(docs)
