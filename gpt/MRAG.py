@@ -24,17 +24,37 @@ def loader(pdf_file):
         docs.append(doc)
     return docs
 
-def parse_segments(segments_file):
-    with open(segments_file, 'r') as f:
-        segments = eval(f.read())
+def add_index_to_segments(segments):
+    for i, segment in enumerate(segments):
+        segment['index'] = i
     return segments
 
-def find_next_text(segments, image_segment):
-    image_index = segments.index(image_segment)
-    for segment in segments[image_index + 1:]:
-        if segment['category'] in ['Text', 'Title', 'NarrativeText']:
-            return segment.get('text', '')
-    return ''
+def write_segments_to_file(segments, filename='segments.txt'):
+    with open(filename, 'w') as f:
+        json.dump(segments, f, indent=2)
+
+def parse_segments(segments_file):
+    with open(segments_file, 'r') as f:
+        segments = json.load(f)
+    return segments
+
+def find_caption(segments, image_segment, max_distance=5):
+    image_index = image_segment['index']
+    image_page = image_segment['page_number']
+    
+    for i in range(image_index + 1, min(image_index + 1 + max_distance, len(segments))):
+        segment = segments[i]
+        if segment['page_number'] != image_page:
+            break  # Stop if we've moved to a different page
+        
+        if segment['category'] in ['Text', 'Title', 'NarrativeText', "UncategorizedText"]:
+            text = segment.get('text', '').strip()
+            if text.lower().startswith(('fig', 'figure')):
+                return text
+            elif len(text) > 10:  # Consider any text segment longer than 10 characters as a potential caption
+                return text
+    
+    return ''  # Return empty string if no suitable caption is found
 
 def extract_unique_images_with_captions(pdf_path, segments):
     doc = fitz.open(pdf_path)
@@ -69,10 +89,11 @@ def extract_unique_images_with_captions(pdf_path, segments):
                 image_filename = f"fig_{figure_count}.png"
                 image.save(os.path.join(path, image_filename))
                 
-                # Find and store the caption (next text segment)
-                caption = find_next_text(segments, segment)
+                # Find and store the caption
+                caption = find_caption(segments, segment)
                 image_captions[image_filename] = caption
                 
+                print(f"Saved {image_filename}")
                 figure_count += 1
     
     doc.close()
@@ -100,9 +121,11 @@ if __name__ == "__main__":
     docs = loader(pdf_file)
     segments = [doc.metadata for doc in docs]
     
+    # Add index to segments
+    segments = add_index_to_segments(segments)
+    
     # Write segments to file
-    with open("segments.txt", "w") as f:
-        f.write(str(segments))
+    write_segments_to_file(segments)
     
     # Print unique categories
     print_unique_categories(segments)
