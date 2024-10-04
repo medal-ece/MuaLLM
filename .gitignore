@@ -15,4 +15,6 @@ option3_images/
 option3_vectordatabase/
 option3_db/
 images/
-
+data_base/
+elements.txt
+segments.txt
