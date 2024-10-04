@@ -48,11 +48,10 @@ def find_caption(segments, image_segment, max_distance=5):
             break  # Stop if we've moved to a different page
         
         if segment['category'] in ['Text', 'Title', 'NarrativeText', "UncategorizedText"]:
-            text = segment.get('text', '').strip()
+            text = next((d.page_content for d in docs if d.metadata.get("index") == i), None)
             if text.lower().startswith(('fig', 'figure')):
                 return text
-            elif len(text) > 10:  # Consider any text segment longer than 10 characters as a potential caption
-                return text
+
     
     return ''  # Return empty string if no suitable caption is found
 
