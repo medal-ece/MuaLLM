@@ -38,24 +38,20 @@ def parse_segments(segments_file):
         segments = json.load(f)
     return segments
 
-def find_caption(segments, image_segment, docs, max_distance=5):
-    image_index = image_segment['index']
-    image_page = image_segment['page_number']
-    image_coords = image_segment['coordinates']
-    
-    for i in range(image_index + 1, min(image_index + 1 + max_distance, len(segments))):
-        segment = segments[i]
-        if segment['page_number'] != image_page:
-            break  # Stop if we've moved to a different page
-        
-        if segment['category'] in ['Text', 'Title', 'NarrativeText', "UncategorizedText"]:
-            text = next((d.page_content for d in docs if d.metadata.get("index") == i), None)
-            if text and text.lower().startswith(('fig', 'figure')):
-                # Check if the text is below the image
-                if segment['coordinates']['points'][0][1] > image_coords['points'][1][1]:
-                    return text
-    
-    return ''  # Return empty string if no suitable caption is found
+def find_caption(image_index, docs, max_distance=3):
+    # image_index = image_segment['index']
+    # image_page = image_segment['page_number']
+    # image_coords = image_segment['coordinates']
+    # get the text from just the next segment
+    caption = ""
+    for i in range(1, max_distance + 1):
+        text_index = image_index + i
+        text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
+        # check if the text is a caption
+        if text.lower().startswith(('fig', 'figure')):
+            caption = text
+            break
+    return caption
 
 def extract_unique_images_with_captions(pdf_path, segments, docs):
     doc = fitz.open(pdf_path)
@@ -91,20 +87,13 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
                 image.save(os.path.join(path, image_filename))
                 
                 # Find and store the caption
-                caption = find_caption(segments, segment, docs)
+                caption = find_caption(segment['index'], docs)
                 image_captions[image_filename] = caption
                 
                 print(f"Saved {image_filename} with caption: {caption[:50]}...")  # Print first 50 chars of caption
                 figure_count += 1
     
     doc.close()
-    
-    # Save captions to a JSON file
-    with open(os.path.join(path, 'image_captions.json'), 'w') as f:
-        json.dump(image_captions, f, indent=2)
-    
-    return figure_count - 1  # Return the number of unique images extracted
-
 #extract tables
 def extract_tables(docs):
     for doc in docs:
@@ -113,7 +102,39 @@ def extract_tables(docs):
             with open(os.path.join(path, 'tables.csv'), 'w') as f:
                 f.write(doc.page_content)
     
-
+# save the text below image
+def save_text_below_image(segments, docs):
+    i = 1
+    max_distance = 2
+    for segment in segments:
+        caption = ""
+        if segment['category'] == 'Image':
+            # get the text below the image
+            image_index = segment['index']
+            # get the text from just the next segment
+            text = ""
+            for i in range(1, max_distance + 1):
+                text_index = image_index + i
+                text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
+                # check if the text is a caption
+                if text.lower().startswith(('fig', 'figure')):
+                    caption = text
+                    break
+    
+            # append the caption to a file
+            with open(os.path.join(path, 'text_below_image.txt'), 'a') as f:
+                f.write(caption)
+                f.write("\n")
+# test_path="data_base/test_images"
+# def extract_images_from_pdf(segments, docs):
+#     for segment in segments:
+#         if segment['category'] == 'Image':
+#             image_index = segment['index']
+#             image = next((d.page_content for d in docs if d.metadata.get("index") == image_index), None)
+#             print(image)
+#             break
+#             image.save(os.path.join(test_path, f"image_{image_index}.png"))
+                
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -138,3 +159,9 @@ if __name__ == "__main__":
 
     # Extract tables
     extract_tables(docs)
+    
+    # save the text below image
+    save_text_below_image(segments, docs)
+
+    # # extract images from pdf
+    # extract_images_from_pdf(segments, docs)
