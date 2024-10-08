@@ -7,17 +7,34 @@ import io
 from PIL import Image
 import imagehash
 import json
+import base64
+import re
+from typing import List, Tuple
+
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_core.messages import HumanMessage
+from langchain.retrievers.multi_vector import MultiVectorRetriever
+from langchain.storage import InMemoryStore
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+
+import uuid
 
 load_dotenv()
 path = "./data_base/images"
-openai_api_key = os.environ["UNSTRUCTURED_API_KEY"]
+DB_PATH = "./data_base"
+openai_api_key = os.environ["OPENAI_API_KEY"]
 
 def loader(pdf_file):
     loader = UnstructuredLoader(
-    file_path=pdf_file,
-    strategy="hi_res",
-    partition_via_api=True,
-    coordinates=True,
+        file_path=pdf_file,
+        strategy="hi_res",
+        partition_via_api=True,
+        coordinates=True,
     )
     docs = []
     for doc in loader.lazy_load():
@@ -33,22 +50,12 @@ def write_segments_to_file(segments, filename='segments.txt'):
     with open(filename, 'w') as f:
         json.dump(segments, f, indent=2)
 
-def parse_segments(segments_file):
-    with open(segments_file, 'r') as f:
-        segments = json.load(f)
-    return segments
-
 def find_caption(image_index, docs, max_distance=3):
-    # image_index = image_segment['index']
-    # image_page = image_segment['page_number']
-    # image_coords = image_segment['coordinates']
-    # get the text from just the next segment
     caption = ""
     for i in range(1, max_distance + 1):
         text_index = image_index + i
         text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
-        # check if the text is a caption
-        if text.lower().startswith(('fig', 'figure')):
+        if text and text.lower().startswith(('fig', 'figure')):
             caption = text
             break
     return caption
@@ -72,96 +79,280 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
             
-            # Convert to PIL Image
             image = Image.open(io.BytesIO(image_bytes))
-            
-            # Compute image hash
             image_hash = str(imagehash.average_hash(image))
             
-            # Check if this image is unique
             if image_hash not in unique_images:
                 unique_images.add(image_hash)
                 
-                # Save the image
                 image_filename = f"fig_{figure_count}.png"
                 image.save(os.path.join(path, image_filename))
                 
-                # Find and store the caption
                 caption = find_caption(segment['index'], docs)
                 image_captions[image_filename] = caption
                 
-                print(f"Saved {image_filename} with caption: {caption[:50]}...")  # Print first 50 chars of caption
+                print(f"Saved {image_filename} with caption: {caption[:50]}...")
                 figure_count += 1
     
     doc.close()
-#extract tables
+    return len(unique_images), image_captions
+
 def extract_tables(docs):
+    tables = []
     for doc in docs:
         if doc.metadata.get("category") == "Table":
-            # write the table to a csv file
-            with open(os.path.join(path, 'tables.csv'), 'w') as f:
-                f.write(doc.page_content)
-    
-# save the text below image
-def save_text_below_image(segments, docs):
-    i = 1
-    max_distance = 2
-    for segment in segments:
-        caption = ""
-        if segment['category'] == 'Image':
-            # get the text below the image
-            image_index = segment['index']
-            # get the text from just the next segment
-            text = ""
-            for i in range(1, max_distance + 1):
-                text_index = image_index + i
-                text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
-                # check if the text is a caption
-                if text.lower().startswith(('fig', 'figure')):
-                    caption = text
-                    break
-    
-            # append the caption to a file
-            with open(os.path.join(path, 'text_below_image.txt'), 'a') as f:
-                f.write(caption)
-                f.write("\n")
-# test_path="data_base/test_images"
-# def extract_images_from_pdf(segments, docs):
-#     for segment in segments:
-#         if segment['category'] == 'Image':
-#             image_index = segment['index']
-#             image = next((d.page_content for d in docs if d.metadata.get("index") == image_index), None)
-#             print(image)
-#             break
-#             image.save(os.path.join(test_path, f"image_{image_index}.png"))
+            tables.append(doc.page_content)
+    return tables
+
+def categorize_elements(docs):
+    texts = []
+    tables = []
+    for doc in docs:
+        if doc.metadata.get("category") == "Table":
+            tables.append(doc.page_content)
+        else:
+            texts.append(doc.page_content)
+    return texts, tables
+
+def generate_text_summaries(texts, tables, summarize_texts=True):
+    prompt_text = """You are an assistant tasked with summarizing tables and text for retrieval. \
+    These summaries will be embedded and used to retrieve the raw text or table elements. \
+    Give a concise summary of the table or text that is well optimized for retrieval. Table or text: {element} """
+    prompt = ChatPromptTemplate.from_template(prompt_text)
+
+    model = ChatOpenAI(temperature=0, model="gpt-4o")
+    summarize_chain = {"element": lambda x: x} | prompt | model | StrOutputParser()
+
+    text_summaries = []
+    table_summaries = []
+
+    if texts and summarize_texts:
+        text_summaries = summarize_chain.batch(texts, {"max_concurrency": 5})
+    elif texts:
+        text_summaries = texts
+
+    if tables:
+        table_summaries = summarize_chain.batch(tables, {"max_concurrency": 5})
+
+    return text_summaries, table_summaries
+
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
+def image_summarize(img_base64, prompt):
+    chat = ChatOpenAI(model="gpt-4o", max_tokens=1024)
+
+    msg = chat.invoke(
+        [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
+                    },
+                ]
+            )
+        ]
+    )
+    return msg.content
+
+def generate_img_summaries(path, image_captions):
+    img_base64_list = []
+    image_summaries = []
+
+    prompt = """You are an assistant tasked with summarizing images for retrieval. 
+    These summaries will be embedded and used to retrieve the raw image. 
+    Give a concise summary of the image that is well optimized for retrieval. 
+    Include the figure number and caption in your summary."""
+
+    for img_file, caption in image_captions.items():
+        img_path = os.path.join(path, img_file)
+        base64_image = encode_image(img_path)
+        img_base64_list.append(base64_image)
+        
+        figure_prompt = f"{img_file}: {caption}\n{prompt}"
+        summary = image_summarize(base64_image, figure_prompt)
+        image_summaries.append(f"{img_file}: {caption}\n{summary}")
+
+    return img_base64_list, image_summaries
+
+def setup_vectorstore():
+    return Chroma(
+        collection_name="option3_vectorstore",
+        embedding_function=OpenAIEmbeddings(),
+        persist_directory=DB_PATH
+    )
+
+def create_multi_vector_retriever(
+    vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images
+):
+    store = InMemoryStore()
+    id_key = "doc_id"
+
+    retriever = MultiVectorRetriever(
+        vectorstore=vectorstore,
+        docstore=store,
+        id_key=id_key,
+    )
+
+    def add_documents(retriever, doc_summaries, doc_contents):
+        doc_ids = [str(uuid.uuid4()) for _ in doc_contents]
+        summary_docs = [
+            Document(page_content=s, metadata={id_key: doc_ids[i]})
+            for i, s in enumerate(doc_summaries)
+        ]
+        retriever.vectorstore.add_documents(summary_docs)
+        retriever.docstore.mset(list(zip(doc_ids, doc_contents)))
+
+    if text_summaries:
+        add_documents(retriever, text_summaries, texts)
+    if table_summaries:
+        add_documents(retriever, table_summaries, tables)
+    if image_summaries:
+        add_documents(retriever, image_summaries, images)
+
+    return retriever
+
+def looks_like_base64(sb):
+    return re.match("^[A-Za-z0-9+/]+[=]{0,2}$", sb) is not None
+
+def is_image_data(b64data):
+    image_signatures = {
+        b"\xff\xd8\xff": "jpg",
+        b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a": "png",
+        b"\x47\x49\x46\x38": "gif",
+        b"\x52\x49\x46\x46": "webp",
+    }
+    try:
+        header = base64.b64decode(b64data)[:8]
+        for sig, format in image_signatures.items():
+            if header.startswith(sig):
+                return True
+        return False
+    except Exception:
+        return False
+
+def split_image_text_types(docs):
+    b64_images = []
+    texts = []
+    for doc in docs:
+        if isinstance(doc, Document):
+            doc = doc.page_content
+        if looks_like_base64(doc) and is_image_data(doc):
+            b64_images.append(doc)
+        else:
+            texts.append(doc)
+    return {"images": b64_images, "texts": texts}
+
+def img_prompt_func(data_dict):
+    formatted_texts = "\n".join(data_dict["context"]["texts"])
+    messages = []
+
+    if data_dict["context"]["images"]:
+        for image in data_dict["context"]["images"]:
+            image_message = {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{image}"},
+            }
+            messages.append(image_message)
+
+    text_message = {
+        "type": "text",
+        "text": (
+            "You are a helpful assistant answer related to the user question. \n"
+            f"User-provided question: {data_dict['question']}\n\n"
+            "Text and / or tables:\n"
+            f"{formatted_texts}"
+        ),
+    }
+    messages.append(text_message)
+    return [HumanMessage(content=messages)]
+
+def multi_modal_rag_chain(retriever):
+    model = ChatOpenAI(temperature=0, model="gpt-4o", max_tokens=1024)
+
+    chain = (
+        {
+            "context": retriever | RunnableLambda(split_image_text_types),
+            "question": RunnablePassthrough(),
+        }
+        | RunnableLambda(img_prompt_func)
+        | model
+        | StrOutputParser()
+    )
+
+    return chain
+
+def main(input_file: str, query: str):
+    if not os.path.exists(DB_PATH):
+        os.makedirs(DB_PATH)
+
+    vectorstore = setup_vectorstore()
+
+    if input_file:
+        docs = loader(input_file)
+        segments = [doc.metadata for doc in docs]
+        segments = add_index_to_segments(segments)
+        write_segments_to_file(segments)
+
+        num_unique_images, image_captions = extract_unique_images_with_captions(input_file, segments, docs)
+        print(f"{num_unique_images} unique images have been extracted and saved with their captions.")
+
+        texts, tables = categorize_elements(docs)
+        
+        text_summaries, table_summaries = generate_text_summaries(texts, tables, summarize_texts=False)
+        
+        img_base64_list, image_summaries = generate_img_summaries(path, image_captions)
+        
+        retriever = create_multi_vector_retriever(
+            vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
+        )
+        print(f"Added new content from {input_file} to the database.")
+    else:
+        print("No input file provided. Using existing database.")
+        retriever = MultiVectorRetriever(
+            vectorstore=vectorstore,
+            docstore=InMemoryStore(),
+            id_key="doc_id",
+        )
+
+    chain_multimodal_rag = multi_modal_rag_chain(retriever)
+    if query:
+        docs = retriever.invoke(query, limit=6)
+        result = chain_multimodal_rag.invoke(query)
+        print(result)
+
+        # Ensure results directory exists
+        if not os.path.exists("results"):
+            os.makedirs("results")
+
+        # Save context details to file
+        with open("results/context_details.txt", 'w') as f:
+            f.write(f"Query: {query}\n\n")
+            f.write(f"Answer: {result}\n\n")
+            f.write("Context Used:\n")
+            
+            for i, doc in enumerate(docs):
+                if isinstance(doc, Document):
+                    content = doc.page_content
+                else:
+                    content = doc
                 
+                if looks_like_base64(content) and is_image_data(content):
+                    f.write(f"Image {i+1} used in context\n")
+                    # Save image
+                    img_data = base64.b64decode(content)
+                    img = Image.open(io.BytesIO(img_data))
+                    img.save(f"results/context_image_{i+1}.jpg")
+                else:
+                    f.write(f"Text {i+1}: {content}\n\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("pdf_file", type=str, help="Path to the PDF file")
+    parser.add_argument("--input", help="Path to the PDF file", required=False)
+    parser.add_argument("--query", help="Query to search for", required=True)
     args = parser.parse_args()
-    pdf_file = args.pdf_file
-    
-    # Load and process the PDF
-    docs = loader(pdf_file)
-    segments = [doc.metadata for doc in docs]
-    
-    # Add index to segments
-    segments = add_index_to_segments(segments)
-    
-    # Write segments to file
-    write_segments_to_file(segments)
-    
-    # Extract and save unique images with captions
-    num_unique_images = extract_unique_images_with_captions(pdf_file, segments, docs)
-    
-    print(f"{num_unique_images} unique images have been extracted and saved with their captions.")
 
-    # Extract tables
-    extract_tables(docs)
-    
-    # save the text below image
-    save_text_below_image(segments, docs)
-
-    # # extract images from pdf
-    # extract_images_from_pdf(segments, docs)
+    main(args.input, args.query)
