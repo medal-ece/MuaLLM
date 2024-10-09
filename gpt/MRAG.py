@@ -76,6 +76,8 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
         
         for img in image_list:
             xref = img[0]
+            print(xref)
+            break
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
             
