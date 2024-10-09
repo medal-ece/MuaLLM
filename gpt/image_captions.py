@@ -42,6 +42,7 @@ def find_caption(image_index, docs, max_distance=3):
         text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
         if text and text.lower().startswith(('fig', 'figure')):
             caption = text
+            print(i)
             break
     return caption
 
@@ -56,15 +57,10 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
     for segment in image_segments:
         page_num = segment['page_number'] - 1
         page = doc[page_num]
-        # get all image segments on the page and store their index
-        image_segments_on_page = [seg for seg in image_segments if seg['page_number'] == page_num+1]
-        image_segments_on_page_indices = [seg['index'] for seg in image_segments_on_page]
-        # print(len(image_segments_on_page_indices))
         
         image_list = page.get_images(full=True)
         
-        # print(len(image_list))
-        for i, img in enumerate(image_list):
+        for img in image_list:
             xref = img[0]
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
@@ -77,12 +73,17 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
                 
                 image_filename = f"fig_{figure_count}.png"
                 image.save(os.path.join(path, image_filename))
-                index = image_segments_on_page_indices[i]
-                caption = find_caption(index, docs)
+                
+                # Find caption for this specific image
+                print(segment['index'])
+                caption = find_caption(segment['index'], docs)
                 image_captions[image_filename] = caption
                 
                 print(f"Saved {image_filename} with caption: {caption[:50]}...")
                 figure_count += 1
+                
+                # Break after processing one image from this segment
+                break
     
     doc.close()
     return len(unique_images), image_captions
