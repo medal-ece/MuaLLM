@@ -35,16 +35,51 @@ def write_segments_to_file(segments, filename='segments.txt'):
     with open(filename, 'w') as f:
         json.dump(segments, f, indent=2)
 
-def find_caption(image_index, docs, max_distance=3):
-    caption = ""
-    for i in range(1, max_distance + 1):
-        text_index = image_index + i
-        text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
-        if text and text.lower().startswith(('fig', 'figure')):
-            caption = text
-            print(i)
-            break
-    return caption
+def find_caption(image_segment, docs, max_vertical_distance=100, overlap_threshold=0.3):
+    image_coords = image_segment['coordinates']['points']
+    image_left, image_top = image_coords[0]
+    image_right, image_bottom = image_coords[2]
+    image_width = image_right - image_left
+    image_height = image_bottom - image_top
+    image_page = image_segment['page_number']
+
+    potential_captions = []
+
+    for doc in docs:
+        if doc.metadata['page_number'] != image_page:
+            continue
+        
+        text_coords = doc.metadata['coordinates']['points']
+        text_left, text_top = text_coords[0]
+        text_right, text_bottom = text_coords[2]
+        text_width = text_right - text_left
+        text_height = text_bottom - text_top
+
+        # Check if text is below the image
+        if text_top > image_bottom and text_top - image_bottom < max_vertical_distance:
+            # Check for horizontal overlap
+            overlap = min(image_right, text_right) - max(image_left, text_left)
+            overlap_ratio = overlap / min(image_width, text_width)
+
+            if overlap > 0 and overlap_ratio > overlap_threshold:
+                # Calculate a score based on position and overlap
+                vertical_distance = text_top - image_bottom
+                horizontal_center_diff = abs((text_left + text_right) / 2 - (image_left + image_right) / 2)
+                
+                score = (1 / (vertical_distance + 1)) * overlap_ratio * (1 / (horizontal_center_diff + 1))
+
+                potential_captions.append((doc, score))
+
+    # Sort potential captions by score in descending order
+    potential_captions.sort(key=lambda x: x[1], reverse=True)
+
+    # Check the top candidates for caption-like text
+    for doc, score in potential_captions[:3]:  # Check top 3 candidates
+        text = doc.page_content.strip()
+        if text.lower().startswith(('figure', 'fig.', 'fig')):
+            return text
+
+    return "Caption not found"
 
 def extract_unique_images_with_captions(pdf_path, segments, docs):
     doc = fitz.open(pdf_path)
@@ -75,8 +110,7 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
                 image.save(os.path.join(path, image_filename))
                 
                 # Find caption for this specific image
-                print(segment['index'])
-                caption = find_caption(segment['index'], docs)
+                caption = find_caption(segment, docs)
                 image_captions[image_filename] = caption
                 
                 print(f"Saved {image_filename} with caption: {caption[:50]}...")
@@ -104,7 +138,6 @@ def categorize_elements(docs):
         else:
             texts.append(doc.page_content)
     return texts, tables
-
 
 def main(input_file: str):
     if not os.path.exists(DB_PATH):
@@ -140,7 +173,6 @@ def main(input_file: str):
         print(f"Extracted content from {input_file} has been saved in the 'results' directory.")
     else:
         print("No input file provided. Please provide a PDF file to process.")
-    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -50,15 +50,51 @@ def write_segments_to_file(segments, filename='segments.txt'):
     with open(filename, 'w') as f:
         json.dump(segments, f, indent=2)
 
-def find_caption(image_index, docs, max_distance=3):
-    caption = ""
-    for i in range(1, max_distance + 1):
-        text_index = image_index + i
-        text = next((d.page_content for d in docs if d.metadata.get("index") == text_index), None)
-        if text and text.lower().startswith(('fig', 'figure')):
-            caption = text
-            break
-    return caption
+def find_caption(image_segment, docs, max_vertical_distance=100, overlap_threshold=0.3):
+    image_coords = image_segment['coordinates']['points']
+    image_left, image_top = image_coords[0]
+    image_right, image_bottom = image_coords[2]
+    image_width = image_right - image_left
+    image_height = image_bottom - image_top
+    image_page = image_segment['page_number']
+
+    potential_captions = []
+
+    for doc in docs:
+        if doc.metadata['page_number'] != image_page:
+            continue
+        
+        text_coords = doc.metadata['coordinates']['points']
+        text_left, text_top = text_coords[0]
+        text_right, text_bottom = text_coords[2]
+        text_width = text_right - text_left
+        text_height = text_bottom - text_top
+
+        # Check if text is below the image
+        if text_top > image_bottom and text_top - image_bottom < max_vertical_distance:
+            # Check for horizontal overlap
+            overlap = min(image_right, text_right) - max(image_left, text_left)
+            overlap_ratio = overlap / min(image_width, text_width)
+
+            if overlap > 0 and overlap_ratio > overlap_threshold:
+                # Calculate a score based on position and overlap
+                vertical_distance = text_top - image_bottom
+                horizontal_center_diff = abs((text_left + text_right) / 2 - (image_left + image_right) / 2)
+                
+                score = (1 / (vertical_distance + 1)) * overlap_ratio * (1 / (horizontal_center_diff + 1))
+
+                potential_captions.append((doc, score))
+
+    # Sort potential captions by score in descending order
+    potential_captions.sort(key=lambda x: x[1], reverse=True)
+
+    # Check the top candidates for caption-like text
+    for doc, score in potential_captions[:3]:  # Check top 3 candidates
+        text = doc.page_content.strip()
+        if text.lower().startswith(('figure', 'fig.', 'fig')):
+            return text
+
+    return "Caption not found"
 
 def extract_unique_images_with_captions(pdf_path, segments, docs):
     doc = fitz.open(pdf_path)
@@ -76,8 +112,6 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
         
         for img in image_list:
             xref = img[0]
-            print(xref)
-            break
             base_image = doc.extract_image(xref)
             image_bytes = base_image["image"]
             
@@ -90,11 +124,15 @@ def extract_unique_images_with_captions(pdf_path, segments, docs):
                 image_filename = f"fig_{figure_count}.png"
                 image.save(os.path.join(path, image_filename))
                 
-                caption = find_caption(segment['index'], docs)
+                # Find caption for this specific image
+                caption = find_caption(segment, docs)
                 image_captions[image_filename] = caption
                 
                 print(f"Saved {image_filename} with caption: {caption[:50]}...")
                 figure_count += 1
+                
+                # Break after processing one image from this segment
+                break
     
     doc.close()
     return len(unique_images), image_captions
@@ -181,51 +219,64 @@ def generate_img_summaries(path, image_captions):
     return img_base64_list, image_summaries
 
 def setup_vectorstore():
-    return Chroma(
-        collection_name="option3_vectorstore",
-        embedding_function=OpenAIEmbeddings(),
-        persist_directory=DB_PATH
+    embedding_function = OpenAIEmbeddings()
+    vectorstore = Chroma(
+        collection_name="multi_modal_rag",
+        embedding_function=embedding_function,
+        persist_directory=DB_PATH,
     )
+    return vectorstore
 
 def create_multi_vector_retriever(
-    vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, images
+    vectorstore, text_summaries, texts, table_summaries, tables, image_summaries, img_base64_list
 ):
-    store = InMemoryStore()
-    id_key = "doc_id"
-
+    # Create the multi-vector retriever
     retriever = MultiVectorRetriever(
         vectorstore=vectorstore,
-        docstore=store,
-        id_key=id_key,
+        docstore=InMemoryStore(),
     )
 
-    def add_documents(retriever, doc_summaries, doc_contents):
-        doc_ids = [str(uuid.uuid4()) for _ in doc_contents]
-        summary_docs = [
-            Document(page_content=s, metadata={id_key: doc_ids[i]})
-            for i, s in enumerate(doc_summaries)
+    # Add text summaries and full texts
+    doc_ids = [str(uuid.uuid4()) for _ in range(len(text_summaries))]
+    retriever.vectorstore.add_documents(
+        [
+            Document(page_content=s, metadata={"doc_id": id})
+            for s, id in zip(text_summaries, doc_ids)
         ]
-        retriever.vectorstore.add_documents(summary_docs)
-        retriever.docstore.mset(list(zip(doc_ids, doc_contents)))
+    )
+    retriever.docstore.mset(list(zip(doc_ids, texts)))
 
-    if text_summaries:
-        add_documents(retriever, text_summaries, texts)
-    if table_summaries:
-        add_documents(retriever, table_summaries, tables)
-    if image_summaries:
-        add_documents(retriever, image_summaries, images)
+    # Add table summaries and full tables
+    table_ids = [str(uuid.uuid4()) for _ in range(len(table_summaries))]
+    retriever.vectorstore.add_documents(
+        [
+            Document(page_content=s, metadata={"doc_id": id})
+            for s, id in zip(table_summaries, table_ids)
+        ]
+    )
+    retriever.docstore.mset(list(zip(table_ids, tables)))
+
+    # Add image summaries and base64 images
+    image_ids = [str(uuid.uuid4()) for _ in range(len(image_summaries))]
+    retriever.vectorstore.add_documents(
+        [
+            Document(page_content=s, metadata={"doc_id": id})
+            for s, id in zip(image_summaries, image_ids)
+        ]
+    )
+    retriever.docstore.mset(list(zip(image_ids, img_base64_list)))
 
     return retriever
 
-def looks_like_base64(sb):
-    return re.match("^[A-Za-z0-9+/]+[=]{0,2}$", sb) is not None
+def looks_like_base64(s):
+    return bool(re.match(r'^[A-Za-z0-9+/]*={0,2}$', s))
 
 def is_image_data(b64data):
     image_signatures = {
-        b"\xff\xd8\xff": "jpg",
-        b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a": "png",
-        b"\x47\x49\x46\x38": "gif",
-        b"\x52\x49\x46\x46": "webp",
+        b'\xFF\xD8\xFF': 'jpg',
+        b'\x89\x50\x4E\x47': 'png',
+        b'\x47\x49\x46\x38': 'gif',
+        b'\x52\x49\x46\x46': 'webp'
     }
     try:
         header = base64.b64decode(b64data)[:8]
