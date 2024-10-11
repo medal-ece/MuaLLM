@@ -36,7 +36,7 @@ from PIL import Image
 from unstructured.documents.elements import Image as UnstructuredImage, Text
 from typing import List, Any, Tuple
 
-path = "option3_images"
+path = "figures"
 DB_PATH = "option3_db"
 
 def extract_pdf_elements(input):
