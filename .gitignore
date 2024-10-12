@@ -19,3 +19,5 @@ data_base/
 elements.txt
 segments.txt
 docstore
+data/
+codebase_chunks.json
