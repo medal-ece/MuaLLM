@@ -6,6 +6,9 @@ import voyageai
 from typing import List, Dict, Any
 from tqdm import tqdm
 from dotenv import load_dotenv
+import argparse
+import subprocess
+import sys
 
 load_dotenv()
 
@@ -21,14 +24,6 @@ class VectorDB:
         self.db_path = f"./data/{name}/vector_db.pkl"
 
     def load_data(self, dataset: List[Dict[str, Any]]):
-        if self.embeddings and self.metadata:
-            print("Vector database is already loaded. Skipping data loading.")
-            return
-        if os.path.exists(self.db_path):
-            print("Loading vector database from disk.")
-            self.load_db()
-            return
-
         texts_to_embed = []
         metadata = []
         total_chunks = sum(len(doc['chunks']) for doc in dataset)
@@ -106,30 +101,68 @@ class VectorDB:
         self.metadata = data["metadata"]
         self.query_cache = json.loads(data["query_cache"])
 
-    def validate_embedded_chunks(self):
-        unique_contents = set()
-        for meta in self.metadata:
-            unique_contents.add(meta['content'])
+
+def process_pdfs(pdf_files: List[str]) -> str:
+    # Get the directory of the current script
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     
-        print(f"Validation results:")
-        print(f"Total embedded chunks: {len(self.metadata)}")
-        print(f"Unique embedded contents: {len(unique_contents)}")
+    # Construct the path to pdf2json.py
+    pdf2json_path = os.path.join(current_dir, "pdf2json.py")
     
-        if len(self.metadata) != len(unique_contents):
-            print("Warning: There may be duplicate chunks in the embedded data.")
-        else:
-            print("All embedded chunks are unique.")
-if __name__ == "__main__":
-    # Load your transformed dataset
-    with open('output.json', 'r') as f:
-        transformed_dataset = json.load(f)
+    # Call pdf2json.py script
+    cmd = [sys.executable, pdf2json_path] + pdf_files + ["-o", "data/data.json"]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running pdf2json.py: {e}")
+        sys.exit(1)
+    return "data/data.json"
+
+def main():
+    parser = argparse.ArgumentParser(description="Process PDF files and create a vector database")
+    parser.add_argument("-i", "--input", nargs="+", required=False, help="PDF files to process")
+    parser.add_argument("-o", "--output", default="retrieval.txt", help="Output file for search results")
+    args = parser.parse_args()
 
     # Initialize the VectorDB
     base_db = VectorDB("base_db")
 
-    # Load and process the data
-    base_db.load_data(transformed_dataset)
-    # write answer to the search query to a file
-    with open("answer.txt", "w") as f:
-        f.write(str(base_db.search("What is nano ampere current reference circuit?", k=1)))
-    
+    if args.input:
+        # Process PDFs using pdf2json.py
+        json_file = process_pdfs(args.input)
+        # Load the processed data
+        with open(json_file, 'r') as f:
+            transformed_dataset = json.load(f)
+        
+        # Load existing database if it exists
+        try:
+            base_db.load_db()
+            print("Loaded existing vector database.")
+        except ValueError:
+            print("Creating new vector database.")
+
+        # Append new data to the existing database
+        base_db.load_data(transformed_dataset)
+    else:
+        # If no input PDFs are provided, try to load existing database
+        try:
+            base_db.load_db()
+            print("Loaded existing vector database.")
+        except ValueError as e:
+            print(f"Error: {e}")
+            print("Please provide input PDFs to create a new database.")
+            sys.exit(1)
+
+    # Perform a search query
+    search_query = "What is nano ampere current reference circuit?"
+    search_results = base_db.search(search_query, k=1)
+
+    # Write answer to the search query to a file
+    with open(args.output, "w") as f:
+        f.write(f"Query: {search_query}\n\n")
+        f.write(json.dumps(search_results, indent=2))
+
+    print(f"Search results saved to {args.output}")
+
+if __name__ == "__main__":
+    main()

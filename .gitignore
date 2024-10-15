@@ -22,3 +22,6 @@ docstore
 data/
 codebase_chunks.json
 answer.txt
+data.json
+retrieval.txt
+data.json
