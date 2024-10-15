@@ -107,7 +107,7 @@ def process_pdfs(pdf_files: List[str]) -> str:
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Construct the path to pdf2json.py
-    pdf2json_path = os.path.join(current_dir, "pdf2json.py")
+    pdf2json_path = os.path.join(current_dir, "pdf2json_chunked.py")
     
     # Call pdf2json.py script
     cmd = [sys.executable, pdf2json_path] + pdf_files + ["-o", "data/data.json"]

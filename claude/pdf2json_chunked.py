@@ -3,38 +3,53 @@ import PyPDF2
 import uuid
 import argparse
 import os
+from langchain_text_splitters import CharacterTextSplitter
+from typing import List, Dict, Any
 
-def process_pdf(pdf_path, doc_id):
+def extract_text_from_pdf(pdf_path: str) -> str:
     with open(pdf_path, 'rb') as file:
         reader = PyPDF2.PdfReader(file)
         content = ""
-        chunks = []
-        
-        for i, page in enumerate(reader.pages):
-            page_text = page.extract_text()
-            content += page_text
-            
-            chunk = {
+        for page in reader.pages:
+            content += page.extract_text()
+    return content
+
+def chunk_text(text: str) -> List[str]:
+    text_splitter = CharacterTextSplitter(
+        separator="\n",
+        chunk_size=4000,
+        chunk_overlap=200,
+        length_function=len
+    )
+    return text_splitter.split_text(text)
+
+def process_pdf(pdf_path: str, doc_id: int) -> Dict[str, Any]:
+    content = extract_text_from_pdf(pdf_path)
+    chunks = chunk_text(content)
+    
+    document = {
+        "doc_id": f"doc_{doc_id}",
+        "original_uuid": str(uuid.uuid4().hex),
+        "content": content,
+        "chunks": [
+            {
                 "chunk_id": f"doc_{doc_id}_chunk_{i}",
                 "original_index": i,
-                "content": page_text
-            }
-            chunks.append(chunk)
-        
-        document = {
-            "doc_id": f"doc_{doc_id}",
-            "original_uuid": str(uuid.uuid4().hex),
-            "content": content,
-            "chunks": chunks
-        }
-        
-        return document
+                "content": chunk
+            } for i, chunk in enumerate(chunks)
+        ]
+    }
+    
+    return document
 
 def main():
-    parser = argparse.ArgumentParser(description="Process PDF files into JSON format")
+    parser = argparse.ArgumentParser(description="Process PDF files into JSON format with chunking")
     parser.add_argument("pdf_files", nargs="+", help="PDF files to process")
-    parser.add_argument("-o", "--output", default="data.json", help="Output JSON file")
+    parser.add_argument("-o", "--output", default="data/data.json", help="Output JSON file")
     args = parser.parse_args()
+
+    # Ensure the output directory exists
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
 
     # Load existing data if the output file exists
     if os.path.exists(args.output):
