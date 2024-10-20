@@ -19,9 +19,8 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
         extract_images_in_pdf=True,
         infer_table_structure=True,
         chunking_strategy="by_title",
-        max_characters=4000,
-        new_after_n_chars=3800,
-        combine_text_under_n_chars=2000,
+        max_characters=512,
+        
     )
 
     content = ""
