@@ -6,39 +6,65 @@ from dotenv import load_dotenv
 from unstructured.partition.pdf import partition_pdf
 import shutil
 import glob
+import re
+import base64
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 
 load_dotenv()
 
+def is_meaningful(text):
+    cleaned_text = re.sub(r'\s', '', text)
+    return len(cleaned_text) > 1 and any(char.isalnum() for char in cleaned_text)
+
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
+def image_summarize(img_base64, prompt):
+    chat = ChatOpenAI(model="gpt-4o", max_tokens=1024)
+    msg = chat.invoke(
+        [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
+                    },
+                ]
+            )
+        ]
+    )
+    return msg.content
+
 def process_pdf(pdf_path, doc_id, output_path, start_number):
-    # Create the output directory if it doesn't exist
     os.makedirs(output_path, exist_ok=True)
 
-    # Extract PDF elements
     elements = partition_pdf(
         filename=pdf_path,
         extract_images_in_pdf=True,
         infer_table_structure=True,
-        chunking_strategy="by_title",
-        max_characters=512,
-        
+        strategy="hi_res"
     )
 
     content = ""
     chunks = []
     images = []
+    chunk_id = 0
 
-    for i, element in enumerate(elements):
+    for element in elements:
         if hasattr(element, 'text'):
-            chunk_text = element.text
-            content += chunk_text
-            chunk = {
-                "chunk_id": f"doc_{doc_id}_chunk_{i}",
-                "original_index": i,
-                "content": chunk_text
-            }
-            chunks.append(chunk)
+            element_text = element.text.strip()
+            if element_text and is_meaningful(element_text):
+                chunks.append({
+                    "chunk_id": f"doc_{doc_id}_chunk_{chunk_id}",
+                    "original_index": chunk_id,
+                    "content": element_text
+                })
+                content += element_text + "\n\n"
+                chunk_id += 1
 
-    # Process extracted images
     figures_dir = os.path.join(os.getcwd(), 'figures')
     if os.path.exists(figures_dir):
         image_files = glob.glob(os.path.join(figures_dir, '*'))
@@ -47,18 +73,26 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
             new_name = f'image_{i}{ext}'
             new_path = os.path.join(output_path, new_name)
             shutil.move(image_file, new_path)
+            
+            # Summarize the image
+            base64_image = encode_image(new_path)
+            prompt = """You are an assistant tasked with summarizing images for retrieval. 
+            These summaries will be embedded and used to retrieve the raw image. 
+            Give a concise summary of the image that is well optimized for retrieval."""
+            summary = image_summarize(base64_image, prompt)
+            
             images.append({
                 "image_id": f"doc_{doc_id}_image_{i}",
-                "path": new_path
+                "path": new_path,
+                "summary": summary
             })
 
-        # Remove the 'figures' directory
         shutil.rmtree(figures_dir)
 
     document = {
         "doc_id": f"doc_{doc_id}",
         "original_uuid": str(uuid.uuid4().hex),
-        "content": content,
+        "content": content.strip(),
         "chunks": chunks,
         "images": images
     }
@@ -75,7 +109,6 @@ def main():
     documents = []
     start_number = 1
 
-    # Get the current highest image number in the output directory
     existing_images = glob.glob(os.path.join(args.image_dir, 'image_*'))
     if existing_images:
         start_number = max([int(os.path.splitext(os.path.basename(f))[0].split('_')[1]) for f in existing_images]) + 1
