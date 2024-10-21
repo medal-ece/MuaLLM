@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 import argparse
 import subprocess
 import sys
+import shutil
 
 load_dotenv()
 
@@ -26,9 +27,9 @@ class VectorDB:
     def load_data(self, dataset: List[Dict[str, Any]]):
         texts_to_embed = []
         metadata = []
-        total_chunks = sum(len(doc['chunks']) for doc in dataset)
+        total_chunks = sum(len(doc['chunks']) for doc in dataset) + sum(len(doc.get('images', [])) for doc in dataset)
         
-        with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
+        with tqdm(total=total_chunks, desc="Processing chunks and images") as pbar:
             for doc in dataset:
                 for chunk in doc['chunks']:
                     texts_to_embed.append(chunk['content'])
@@ -37,18 +38,33 @@ class VectorDB:
                         'original_uuid': doc['original_uuid'],
                         'chunk_id': chunk['chunk_id'],
                         'original_index': chunk['original_index'],
-                        'content': chunk['content']
+                        'content': chunk['content'],
+                        'type': 'text'
+                    })
+                    pbar.update(1)
+                
+                for image in doc.get('images', []):
+                    texts_to_embed.append(image['summary'])
+                    metadata.append({
+                        'doc_id': doc['doc_id'],
+                        'original_uuid': doc['original_uuid'],
+                        'image_id': image['image_id'],
+                        'path': image['path'],
+                        'summary': image['summary'],
+                        'type': 'image'
                     })
                     pbar.update(1)
 
         self._embed_and_store(texts_to_embed, metadata)
         self.save_db()
         
-        print(f"Vector database loaded and saved. Total chunks processed: {len(texts_to_embed)}")
+        print(f"Vector database loaded and saved. Total items processed: {len(texts_to_embed)}")
+        print(f"Text chunks: {len([m for m in metadata if m['type'] == 'text'])}")
+        print(f"Images: {len([m for m in metadata if m['type'] == 'image'])}")
 
     def _embed_and_store(self, texts: List[str], data: List[Dict[str, Any]]):
         batch_size = 128
-        with tqdm(total=len(texts), desc="Embedding chunks") as pbar:
+        with tqdm(total=len(texts), desc="Embedding items") as pbar:
             result = []
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
@@ -100,16 +116,14 @@ class VectorDB:
         self.embeddings = data["embeddings"]
         self.metadata = data["metadata"]
         self.query_cache = json.loads(data["query_cache"])
-
+        print(f"Loaded database with {len(self.metadata)} items")
+        print(f"Text chunks: {len([m for m in self.metadata if m['type'] == 'text'])}")
+        print(f"Images: {len([m for m in self.metadata if m['type'] == 'image'])}")
 
 def process_pdfs(pdf_files: List[str]) -> str:
-    # Get the directory of the current script
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Construct the path to pdf2json.py
     pdf2json_path = os.path.join(current_dir, "pdf2json_chunked.py")
     
-    # Call pdf2json.py script
     cmd = [sys.executable, pdf2json_path] + pdf_files + ["-o", "data/data.json"]
     try:
         subprocess.run(cmd, check=True)
@@ -118,33 +132,36 @@ def process_pdfs(pdf_files: List[str]) -> str:
         sys.exit(1)
     return "data/data.json"
 
+def copy_image_to_context(image_path: str, context_folder: str) -> str:
+    os.makedirs(context_folder, exist_ok=True)
+    filename = os.path.basename(image_path)
+    destination = os.path.join(context_folder, filename)
+    shutil.copy2(image_path, destination)
+    return destination
+
 def main():
-    parser = argparse.ArgumentParser(description="Process PDF files and create a vector database")
+    parser = argparse.ArgumentParser(description="Process PDF files, create a vector database, and perform searches")
     parser.add_argument("-i", "--input", nargs="+", required=False, help="PDF files to process")
     parser.add_argument("-o", "--output", default="retrieval.txt", help="Output file for search results")
+    parser.add_argument("-q", "--query", required=False, help="Search query")
+    parser.add_argument("-k", "--top_k", type=int, default=10, help="Number of top results to return")
     args = parser.parse_args()
 
-    # Initialize the VectorDB
     base_db = VectorDB("base_db")
 
     if args.input:
-        # Process PDFs using pdf2json.py
         json_file = process_pdfs(args.input)
-        # Load the processed data
         with open(json_file, 'r') as f:
             transformed_dataset = json.load(f)
         
-        # Load existing database if it exists
         try:
             base_db.load_db()
             print("Loaded existing vector database.")
         except ValueError:
             print("Creating new vector database.")
 
-        # Append new data to the existing database
         base_db.load_data(transformed_dataset)
     else:
-        # If no input PDFs are provided, try to load existing database
         try:
             base_db.load_db()
             print("Loaded existing vector database.")
@@ -153,16 +170,35 @@ def main():
             print("Please provide input PDFs to create a new database.")
             sys.exit(1)
 
-    # Perform a search query
-    search_query = "What is nano ampere current reference circuit?"
-    search_results = base_db.search(search_query, k=1)
+    if args.query:
+        search_query = args.query
+    else:
+        search_query = input("Enter your search query: ")
 
-    # Write answer to the search query to a file
+    search_results = base_db.search(search_query, k=args.top_k)
+
+    # Debug information
+    print(f"Total search results: {len(search_results)}")
+    text_results = [r for r in search_results if r['metadata']['type'] == 'text']
+    image_results = [r for r in search_results if r['metadata']['type'] == 'image']
+    print(f"Text results: {len(text_results)}")
+    print(f"Image results: {len(image_results)}")
+
+    context_folder = "context_images"
     with open(args.output, "w") as f:
         f.write(f"Query: {search_query}\n\n")
-        f.write(json.dumps(search_results, indent=2))
+        for i, result in enumerate(search_results, 1):
+            f.write(f"{i}. ")
+            if result['metadata']['type'] == 'text':
+                f.write(f"Text Content: {result['metadata']['content'][:500]}...\n")
+            elif result['metadata']['type'] == 'image':
+                f.write(f"Image Summary: {result['metadata']['summary'][:500]}...\n")
+                new_image_path = copy_image_to_context(result['metadata']['path'], context_folder)
+                f.write(f"   Image copied to: {new_image_path}\n")
+            f.write(f"   Similarity: {result['similarity']:.4f}\n\n")
 
     print(f"Search results saved to {args.output}")
+    print(f"Relevant images (if any) copied to {context_folder}")
 
 if __name__ == "__main__":
     main()

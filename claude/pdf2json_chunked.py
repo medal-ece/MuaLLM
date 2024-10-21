@@ -10,8 +10,55 @@ import re
 import base64
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
+from anthropic import Anthropic
 
 load_dotenv()
+
+client = Anthropic()
+
+DOCUMENT_CONTEXT_PROMPT = """
+<document>
+{doc_content}
+</document>
+"""
+
+CHUNK_CONTEXT_PROMPT = """
+Here is the chunk we want to situate within the whole document
+<chunk>
+{chunk_content}
+</chunk>
+
+Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
+Answer only with the succinct context and nothing else.
+"""
+
+IMAGE_CONTEXT_PROMPT = """
+Analyze the provided image in the context of the entire document and provide a caption:
+
+<image>
+[A base64 encoded image will be provided here]
+</image>
+
+Your tasks:
+1. Locate the exact image caption:
+   - Thoroughly search the entire document for the precise caption associated with this image.
+   - Look for text starting with "Figure", "Fig.", "Table", "Image", "Illustration", or similar, followed by a number or letter (e.g., "Figure 1.2", "Table A").
+   - The caption may be anywhere in the document, not necessarily near the image description.
+   - If you find a caption, copy it verbatim, preserving all original text, punctuation, and formatting.
+   - If multiple captions seem relevant, choose the most likely match based on the image content.
+   - If no caption is found, state "No caption found" and briefly describe the image content.
+
+2. Provide concise context:
+   - Explain how this image relates to the document's main topics or arguments.
+   - Identify key elements in the image that are significant to the document's content.
+   - Include relevant keywords or phrases from the document that relate to this image.
+
+Format your response as follows:
+Exact Caption: [Verbatim caption from the document, or "No caption found"]
+Context: [2-3 sentences of context, including the relationship to the document and search-optimized details]
+
+Important: Ensure the caption is copied exactly as it appears in the document. Do not paraphrase or summarize the caption. The context should enable effective retrieval and understanding of the image within the document's context.
+"""
 
 def is_meaningful(text):
     cleaned_text = re.sub(r'\s', '', text)
@@ -37,6 +84,54 @@ def image_summarize(img_base64, prompt):
         ]
     )
     return msg.content
+
+def situate_context(doc: str, chunk: str, is_image: bool = False, image_path: str = None) -> str:
+    if is_image and image_path:
+        base64_image = encode_image(image_path)
+        content = [
+            {
+                "type": "text",
+                "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=doc),
+            },
+            {
+                "type": "text",
+                "text": IMAGE_CONTEXT_PROMPT,
+            },
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": base64_image
+                }
+            }
+        ]
+    else:
+        content = [
+            {
+                "type": "text",
+                "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=doc),
+                "cache_control": {"type": "ephemeral"}
+            },
+            {
+                "type": "text",
+                "text": CHUNK_CONTEXT_PROMPT.format(chunk_content=chunk),
+            }
+        ]
+    
+    response = client.beta.prompt_caching.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=1024,
+        temperature=0.0,
+        messages=[
+            {
+                "role": "user", 
+                "content": content
+            }
+        ],
+        extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
+    )
+    return response.content[0].text
 
 def process_pdf(pdf_path, doc_id, output_path, start_number):
     os.makedirs(output_path, exist_ok=True)
@@ -74,7 +169,6 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
             new_path = os.path.join(output_path, new_name)
             shutil.move(image_file, new_path)
             
-            # Summarize the image
             base64_image = encode_image(new_path)
             prompt = """You are an assistant tasked with summarizing images for retrieval. 
             These summaries will be embedded and used to retrieve the raw image. 
@@ -88,6 +182,16 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
             })
 
         shutil.rmtree(figures_dir)
+
+    # Generate context for text chunks and append to content
+    for chunk in chunks:
+        chunk_context = situate_context(content, chunk['content'])
+        chunk['content'] += f"\n\nContext: {chunk_context}"
+
+    # Generate context for images and append to summary
+    for image in images:
+        image_context = situate_context(content, "", is_image=True, image_path=image['path'])
+        image['summary'] += f"\n\n{image_context}"
 
     document = {
         "doc_id": f"doc_{doc_id}",
