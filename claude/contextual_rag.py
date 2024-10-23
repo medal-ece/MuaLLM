@@ -10,6 +10,10 @@ import argparse
 import subprocess
 import sys
 import shutil
+from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 load_dotenv()
 
@@ -27,8 +31,9 @@ class VectorDB:
     def load_data(self, dataset: List[Dict[str, Any]]):
         texts_to_embed = []
         metadata = []
-        total_chunks = sum(len(doc['chunks']) for doc in dataset) + sum(len(doc.get('images', [])) for doc in dataset)
+        total_chunks = sum(len(doc['chunks']) for doc in dataset) + sum(len(doc['images']) for doc in dataset)
         
+        # Load the persistent image data
         with tqdm(total=total_chunks, desc="Processing chunks and images") as pbar:
             for doc in dataset:
                 for chunk in doc['chunks']:
@@ -43,12 +48,13 @@ class VectorDB:
                     })
                     pbar.update(1)
                 
-                for image in doc.get('images', []):
+                for image in doc['images']:
+                    image_id = image['image_id']
                     texts_to_embed.append(image['summary'])
                     metadata.append({
                         'doc_id': doc['doc_id'],
                         'original_uuid': doc['original_uuid'],
-                        'image_id': image['image_id'],
+                        'image_id': image_id,
                         'path': image['path'],
                         'summary': image['summary'],
                         'type': 'image'
@@ -130,6 +136,7 @@ def process_pdfs(pdf_files: List[str]) -> str:
     except subprocess.CalledProcessError as e:
         print(f"Error running pdf2json.py: {e}")
         sys.exit(1)
+    
     return "data/data.json"
 
 def copy_image_to_context(image_path: str, context_folder: str) -> str:
@@ -139,12 +146,66 @@ def copy_image_to_context(image_path: str, context_folder: str) -> str:
     shutil.copy2(image_path, destination)
     return destination
 
+def extract_image(image_path: str, output_folder: str) -> str:
+    os.makedirs(output_folder, exist_ok=True)
+    filename = os.path.basename(image_path)
+    destination = os.path.join(output_folder, filename)
+    
+    try:
+        shutil.copy2(image_path, destination)
+        return destination
+    except FileNotFoundError:
+        return f"Original image file not found: {image_path}"
+
+def perform_rag(search_query: str, search_results: List[Dict[str, Any]]) -> str:
+    """
+    Perform Retrieval-Augmented Generation (RAG) using the search results and GPT.
+    
+    Args:
+    search_query (str): The original search query.
+    search_results (List[Dict[str, Any]]): The results from the vector search.
+    
+    Returns:
+    str: The generated response.
+    """
+    # Prepare context from search results
+    context = ""
+    for result in search_results:
+        if result['metadata']['type'] == 'text':
+            context += f"Text: {result['metadata']['content']}\n\n"
+        elif result['metadata']['type'] == 'image':
+            context += f"Image Summary: {result['metadata']['summary']}\n\n"
+
+    # Create a prompt template
+    prompt = ChatPromptTemplate.from_template(
+        """You are a helpful assistant. Use the provided context to answer the user's query.
+        If the answer is not in the context, say you don't know.
+
+        Context:
+        {context}
+
+        User Query: {query}
+
+        Assistant: Let me help you with that query based on the information I have."""
+    )
+
+    # Create a ChatOpenAI instance
+    model = ChatOpenAI(temperature=0, model="gpt-4")
+
+    # Create the RAG chain
+    chain = prompt | model | StrOutputParser()
+
+    # Generate the response
+    response = chain.invoke({"context": context, "query": search_query})
+
+    return response
+
 def main():
     parser = argparse.ArgumentParser(description="Process PDF files, create a vector database, and perform searches")
     parser.add_argument("-i", "--input", nargs="+", required=False, help="PDF files to process")
     parser.add_argument("-o", "--output", default="retrieval.txt", help="Output file for search results")
     parser.add_argument("-q", "--query", required=False, help="Search query")
-    parser.add_argument("-k", "--top_k", type=int, default=10, help="Number of top results to return")
+    parser.add_argument("-k", "--top_k", type=int, default=5, help="Number of top results to return")
     args = parser.parse_args()
 
     base_db = VectorDB("base_db")
@@ -168,37 +229,45 @@ def main():
         except ValueError as e:
             print(f"Error: {e}")
             print("Please provide input PDFs to create a new database.")
-            sys.exit(1)
+            sys.exit(1) 
 
     if args.query:
         search_query = args.query
     else:
         search_query = input("Enter your search query: ")
 
+    print(f"Searching for: {search_query}")
     search_results = base_db.search(search_query, k=args.top_k)
 
-    # Debug information
-    print(f"Total search results: {len(search_results)}")
-    text_results = [r for r in search_results if r['metadata']['type'] == 'text']
-    image_results = [r for r in search_results if r['metadata']['type'] == 'image']
-    print(f"Text results: {len(text_results)}")
-    print(f"Image results: {len(image_results)}")
+    # Perform RAG
+    generated_response = perform_rag(search_query, search_results)
+    print(f"Generated Response: {generated_response}")
 
-    context_folder = "context_images"
+    # Write results to output file
+    output_folder = "extracted_images"
     with open(args.output, "w") as f:
         f.write(f"Query: {search_query}\n\n")
+        f.write("Search Results:\n")
         for i, result in enumerate(search_results, 1):
             f.write(f"{i}. ")
             if result['metadata']['type'] == 'text':
-                f.write(f"Text Content: {result['metadata']['content'][:500]}...\n")
+                content = result['metadata']['content'][:500] + "..." if len(result['metadata']['content']) > 500 else result['metadata']['content']
+                f.write(f"Text Content: {content}\n")
             elif result['metadata']['type'] == 'image':
-                f.write(f"Image Summary: {result['metadata']['summary'][:500]}...\n")
-                new_image_path = copy_image_to_context(result['metadata']['path'], context_folder)
-                f.write(f"   Image copied to: {new_image_path}\n")
+                summary = result['metadata']['summary'][:500] + "..." if len(result['metadata']['summary']) > 500 else result['metadata']['summary']
+                f.write(f"Image Summary: {summary}\n")
+                extracted_image_path = extract_image(result['metadata']['path'], output_folder)
+                f.write(f"   Image extracted to: {extracted_image_path}\n")
             f.write(f"   Similarity: {result['similarity']:.4f}\n\n")
+        
+        f.write("\nGenerated Response:\n")
+        f.write(generated_response)
 
-    print(f"Search results saved to {args.output}")
-    print(f"Relevant images (if any) copied to {context_folder}")
+    print(f"Search results and generated response saved to {args.output}")
 
 if __name__ == "__main__":
     main()
+
+
+
+
