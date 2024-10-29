@@ -11,6 +11,9 @@ import base64
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from anthropic import Anthropic
+import nltk
+from nltk.tokenize import sent_tokenize
+nltk.download('punkt', quiet=True)
 
 load_dotenv()
 
@@ -133,6 +136,27 @@ def situate_context(doc: str, chunk: str, is_image: bool = False, image_path: st
     )
     return response.content[0].text
 
+def create_chunks(text, max_chunk_size=1000, overlap=200):
+    sentences = sent_tokenize(text)
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) <= max_chunk_size:
+            current_chunk += sentence + " "
+        else:
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
+            
+            # Add overlap
+            overlap_text = " ".join(chunks[-1].split()[-overlap//10:])
+            current_chunk = overlap_text + " " + current_chunk
+    
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    return chunks
+
 def process_pdf(pdf_path, doc_id, output_path, start_number):
     os.makedirs(output_path, exist_ok=True)
 
@@ -152,13 +176,18 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
         if hasattr(element, 'text'):
             element_text = element.text.strip()
             if element_text and is_meaningful(element_text):
-                chunks.append({
-                    "chunk_id": f"doc_{doc_id}_chunk_{chunk_id}",
-                    "original_index": chunk_id,
-                    "content": element_text
-                })
                 content += element_text + "\n\n"
-                chunk_id += 1
+
+    # Create chunks from the entire content
+    text_chunks = create_chunks(content)
+    
+    for chunk in text_chunks:
+        chunks.append({
+            "chunk_id": f"doc_{doc_id}_chunk_{chunk_id}",
+            "original_index": chunk_id,
+            "content": chunk
+        })
+        chunk_id += 1
 
     figures_dir = os.path.join(os.getcwd(), 'figures')
     if os.path.exists(figures_dir):
@@ -183,7 +212,7 @@ def process_pdf(pdf_path, doc_id, output_path, start_number):
 
         shutil.rmtree(figures_dir)
 
-    # Generate context for text chunks and append to content
+    # Generate context for text chunks
     for chunk in chunks:
         chunk_context = situate_context(content, chunk['content'])
         chunk['content'] += f"\n\nContext: {chunk_context}"

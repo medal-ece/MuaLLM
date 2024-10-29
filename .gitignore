@@ -25,3 +25,8 @@ answer.txt
 data.json
 retrieval.txt
 data.json
+extracted_images/
+images.json
+reasoning_response.txt
+circuit_analysis_log.txt
+circuit_analysis_summary.txt

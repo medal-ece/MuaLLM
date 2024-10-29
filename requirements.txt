@@ -25,3 +25,4 @@ elasticsearch
 pandas
 numpy
 PyPDF2
+cohere
