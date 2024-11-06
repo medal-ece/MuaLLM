@@ -3,7 +3,7 @@ import pickle
 import json
 import numpy as np
 import voyageai
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Tuple
 from tqdm import tqdm
 from dotenv import load_dotenv
 import argparse
@@ -177,7 +177,7 @@ class VectorDB:
         self.metadata = data
 
     def search(self, query: str, k: int = 20) -> List[Dict[str, Any]]:
-        # Get semantic search results
+        # Get query embedding
         if query in self.query_cache:
             query_embedding = self.query_cache[query]
         else:
@@ -185,24 +185,25 @@ class VectorDB:
             self.query_cache[query] = query_embedding
 
         if not self.embeddings:
-            raise ValueError("No data loaded in the vector database.")
+            raise ValueError("No embeddings found. Please load data first.")
 
-        similarities = np.dot(self.embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[::-1][:k]
+        # Calculate cosine similarities
+        similarities = np.dot(self.embeddings, query_embedding) / (
+            np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(query_embedding)
+        )
         
-        semantic_results = []
-        for idx in top_indices:
-            result = {
-                "metadata": self.metadata[idx],
-                "similarity": float(similarities[idx]),
-            }
-            semantic_results.append(result)
-
-        # Get BM25 results
-        bm25_results = self.es_bm25.search(query, k=k)
-
-        # Combine results using weighted scoring
-        return self.combine_results(semantic_results, bm25_results, k)
+        # Get top k indices
+        top_k_indices = np.argsort(similarities)[-k:][::-1]
+        
+        # Format results
+        results = []
+        for idx in top_k_indices:
+            results.append({
+                'metadata': self.metadata[idx],
+                'similarity': float(similarities[idx])  # Convert to float for JSON serialization
+            })
+        
+        return results
 
     def combine_results(self, semantic_results, bm25_results, k, 
                        semantic_weight=0.8, bm25_weight=0.2):
@@ -322,31 +323,58 @@ def process_pdfs(pdf_files: List[str]) -> str:
     
     return "data/data.json"
 
-def extract_image(image_path: str, output_folder: str) -> str:
+def extract_image(image_path: str, output_folder: str, model_info: str = None) -> Dict[str, str]:
+    """Extract image and return both path and model info"""
     os.makedirs(output_folder, exist_ok=True)
     filename = os.path.basename(image_path)
     destination = os.path.join(output_folder, filename)
     
     try:
         shutil.copy2(image_path, destination)
-        return destination
+        return {
+            "path": destination,
+            "model": model_info if model_info else "Unknown"
+        }
     except FileNotFoundError:
-        return f"Original image file not found: {image_path}"
+        return {
+            "path": f"Original image file not found: {image_path}",
+            "model": "Error"
+        }
 
-def perform_rag(search_query: str, search_results: List[Dict[str, Any]]) -> str:
+def perform_rag(search_query: str, search_results: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
     """
     Perform RAG using combined semantic and BM25 search results.
+    Returns the generated response and list of images used.
     """
     context = ""
+    used_images = []
+    
     for result in search_results:
-        if result['metadata']['type'] == 'text':
-            context += f"Text: {result['metadata']['content']}\n\n"
-        elif result['metadata']['type'] == 'image':
-            context += f"Image Summary: {result['metadata']['summary']}\n\n"
+        try:
+            if 'metadata' not in result:
+                continue
+                
+            metadata = result['metadata']
+            if metadata.get('type') == 'text':
+                context += f"Text: {metadata.get('content', '')}\n\n"
+            elif metadata.get('type') == 'image':
+                image_path = metadata.get('path', '')
+                if image_path:
+                    used_images.append(image_path)
+                context += f"Image Summary: {metadata.get('summary', '')}\n\n"
+                
+            similarity = result.get('similarity', 0)
+            context += f"Relevance Score: {similarity:.4f}\n\n"
+            
+        except Exception as e:
+            print(f"Error processing result: {e}")
+            continue
 
     prompt = ChatPromptTemplate.from_template(
         """You are a helpful assistant. Use the provided context to answer the user's query.
         If the answer is not in the context, say you don't know.
+        If you reference any figures or images in your response, please explicitly indicate 
+        which image file contains that figure (e.g., "This circuit is shown in <image_path>").
 
         Context:
         {context}
@@ -360,7 +388,7 @@ def perform_rag(search_query: str, search_results: List[Dict[str, Any]]) -> str:
     chain = prompt | model | StrOutputParser()
     response = chain.invoke({"context": context, "query": search_query})
 
-    return response
+    return response, used_images
 
 def evaluate_retrieval_rerank(queries: List[Dict[str, Any]], 
                             retrieval_function: Callable, 
@@ -409,6 +437,40 @@ def evaluate_retrieval_rerank(queries: List[Dict[str, Any]],
         "total_queries": total_queries
     }
 
+def manage_image_folder(folder: str):
+    """Clear existing image folder and create a new one"""
+    if os.path.exists(folder):
+        shutil.rmtree(folder)
+    os.makedirs(folder)
+
+def write_response_with_images(f, generated_response: str, extracted_images: List[Dict[str, Any]]):
+    """Write the response and copy referenced images to a special folder"""
+    # Create a folder for referenced images
+    referenced_images_dir = "referenced_images"
+    os.makedirs(referenced_images_dir, exist_ok=True)
+    
+    # Write the original response
+    f.write("\nGenerated Response:\n")
+    
+    # Find all image references in the response
+    referenced_files = []
+    for img in extracted_images:
+        if img['filename'] in generated_response:
+            src_path = os.path.join("extracted_images", img['filename'])
+            dest_path = os.path.join(referenced_images_dir, img['filename'])
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dest_path)
+                referenced_files.append(img['filename'])
+    
+    # Add image references to the response
+    modified_response = generated_response
+    if referenced_files:
+        modified_response += "\n\nReferenced Images:\n"
+        for img_file in referenced_files:
+            modified_response += f"\n- {img_file}"
+            
+    f.write(modified_response)
+
 def main():
     parser = argparse.ArgumentParser(description="Process PDF files, create a vector database, and perform searches")
     parser.add_argument("-i", "--input", nargs="+", required=False, help="PDF files to process")
@@ -420,8 +482,7 @@ def main():
     base_db = VectorDB("base_db")
 
     if args.input:
-        # json_file = process_pdfs(args.input)
-        json_file = "data/data.json"
+        json_file = process_pdfs(args.input)
         with open(json_file, 'r') as f:
             transformed_dataset = json.load(f)
         
@@ -452,13 +513,19 @@ def main():
     search_results = base_db.search_with_rerank(search_query, k=args.top_k)
 
     # Perform RAG
-    generated_response = perform_rag(search_query, search_results)
+    generated_response, used_images = perform_rag(search_query, search_results)
 
+    # Clear and recreate image folder for new query
+    manage_image_folder("extracted_images")
+    
     # Write results to output file
-    output_folder = "extracted_images"
     with open(args.output, "w") as f:
         f.write(f"Query: {search_query}\n\n")
         f.write("Search Results (with reranking):\n")
+        
+        # Track extracted images and their usage
+        extracted_images = []
+        
         for i, result in enumerate(search_results, 1):
             f.write(f"{i}. ")
             if result['metadata']['type'] == 'text':
@@ -469,12 +536,42 @@ def main():
                 summary = result['metadata']['summary'][:500] + "..." \
                     if len(result['metadata']['summary']) > 500 else result['metadata']['summary']
                 f.write(f"Image Summary: {summary}\n")
-                extracted_image_path = extract_image(result['metadata']['path'], output_folder)
-                f.write(f"   Image extracted to: {extracted_image_path}\n")
+                
+                image_path = result['metadata']['path']
+                was_used = image_path in used_images
+                
+                extraction_result = extract_image(
+                    image_path,
+                    "extracted_images",
+                    result['metadata'].get('model_used', 'Unknown')
+                )
+                
+                extracted_images.append({
+                    "filename": os.path.basename(extraction_result["path"]),
+                    "model": extraction_result["model"],
+                    "used_in_response": was_used
+                })
+                
+                f.write(f"   Image extracted to: {extraction_result['path']}\n")
+                f.write(f"   Used in response: {'Yes' if was_used else 'No'}\n")
             f.write(f"   Relevance Score: {result['similarity']:.4f}\n\n")
         
-        f.write("\nGenerated Response:\n")
-        f.write(generated_response)
+        # Write summary of extracted images
+        if extracted_images:
+            f.write("\nExtracted Images Summary:\n")
+            f.write("-" * 40 + "\n")
+            f.write("\nImages Used in Response:\n")
+            for img in extracted_images:
+                if img['used_in_response']:
+                    f.write(f"✓ {img['filename']}\n")
+            
+            f.write("\nImages Not Used in Response:\n")
+            for img in extracted_images:
+                if not img['used_in_response']:
+                    f.write(f"✗ {img['filename']}\n")
+            
+        # Write response with referenced images
+        write_response_with_images(f, generated_response, extracted_images)
 
     print(f"Search results and generated response saved to {args.output}")
 
