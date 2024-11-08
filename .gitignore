@@ -32,3 +32,5 @@ circuit_analysis_log.txt
 circuit_analysis_summary.txt
 table_db/
 table_results/
+agent_db/
+output/
