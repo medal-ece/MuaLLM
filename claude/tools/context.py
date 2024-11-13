@@ -29,12 +29,31 @@ DOCUMENT_CONTEXT_PROMPT = """
 """
 
 CHUNK_TABLE_PROMPT = """
-Here is the chunk we want to find if it contains tabular data:
+Analyze this chunk and determine if it contains tabular data:
 
 <chunk>
 {chunk_content}
 </chunk>
-If the text chunk above contains any tabular data not just the explanation of the table content but actual data in table format, answer with "TABLE: Yes". If it does not contain tabular data, answer with "TABLE: No".
+
+Look specifically for:
+1. Data organized in rows and columns
+2. Numerical measurements or values in structured format
+3. Table headers or column labels
+4. Comparison data laid out in grid format
+5. Performance metrics or specifications in tabular form
+6. Column separators (|, tabs, or consistent spacing)
+7. Table captions or numbering (e.g., "Table 1:", "Table II")
+
+Do not consider:
+- Text descriptions about tables
+- References to tables
+- Prose explaining table contents
+- Lists or enumerations
+- Single column data
+
+Answer with only:
+"TABLE: Yes" - if actual tabular data is present
+"TABLE: No" - if no structured tabular data is found
 """
 
 CHUNK_CONTEXT_PROMPT = """

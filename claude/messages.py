@@ -159,50 +159,195 @@ Example session:
 
 Question: Analyze this comparison table and recommend the best low-power bandgap reference circuit.
 
-Thought: I need to first extract and structure the table data, then investigate the referenced papers.
-
-Reasoning:
-1. Extract table content to understand all designs
-2. Look up referenced papers for complete context
-3. Search for detailed circuit implementations
-4. Compare all designs systematically
-
-Action: extract_table: comparison_table.jpg
+Thought: I need to first convert the table into a structured DataFrame to understand the table structure better.
+Action: extract_table: path[comparison_table.jpg]
 PAUSE
 
 Observation: DataFrame extracted:
-| Work      | VDD(V) | Power(nW) | Temp Range(°C) | Ref |
-|-----------|--------|-----------|----------------|-----|
-| This work | 0.7    | 52.5      | -20 to 80     | -   |
-| [13]      | 1.2    | 100       | -40 to 85     | 13  |
-| [15]      | 1.8    | 200       | -55 to 125    | 15  |
+{
+  "this_work": {
+    "cmos_technology": "0.18 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.2 - 1.8",
+    "active_area": "0.0098",
+    "reference_voltage": "1.09",
+    "temperature_range": "-40 to 120",
+    "tc_ppm": "147",
+    "coefficient_of_variation": "0.757",
+    "power_dissipation": "0.102",
+    "psrr_db": "@20/100 Hz"
+  },
+  "reference_13": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.7 - 3.3",
+    "active_area": "0.048",
+    "reference_voltage": "1.23",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "105",
+    "coefficient_of_variation": "1.05",
+    "power_dissipation": "800 uW @Room temp.",
+    "psrr_db": "-56@100 Hz"
+  },
+  "reference_3": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.3 - 3.1",
+    "active_area": "0.13",
+    "reference_voltage": "1.23",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "25",
+    "coefficient_of_variation": "1.04",
+    "power_dissipation": "N/A",
+    "psrr_db": "N/A"
+  },
+  "reference_4": {
+    "cmos_technology": "0.5 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "≥ 1.2",
+    "active_area": "0.2",
+    "reference_voltage": "1.2",
+    "temperature_range": "-40 to 100",
+    "tc_ppm": "9",
+    "coefficient_of_variation": "1.01",
+    "power_dissipation": "N/A",
+    "psrr_db": "-44@10 Hz"
+  },
+  "reference_5": {
+    "cmos_technology": "0.16 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.8±10%",
+    "active_area": "0.026",
+    "reference_voltage": "0.6",
+    "temperature_range": "-25 to 100",
+    "tc_ppm": "17.6",
+    "coefficient_of_variation": "1.02",
+    "power_dissipation": "N/A",
+    "psrr_db": "-48@100 Hz"
+  },
+  "reference_6": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.7 - 3.5",
+    "active_area": "0.1",
+    "reference_voltage": "1.2",
+    "temperature_range": "-55 to 125",
+    "tc_ppm": "25",
+    "coefficient_of_variation": "N/A (Trimmed)",
+    "power_dissipation": "N/A",
+    "psrr_db": "-74@DC"
+  },
+  "reference_7": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.1 - 1.8",
+    "active_area": "0.05",
+    "reference_voltage": "0.6",
+    "temperature_range": "-55 to 125",
+    "tc_ppm": "N/A",
+    "coefficient_of_variation": "N/A",
+    "power_dissipation": "N/A @Room temp.",
+    "psrr_db": "N/A"
+  },
+  "reference_9": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.4 - 3.0",
+    "active_area": "0.09",
+    "reference_voltage": "0.6",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "20",
+    "coefficient_of_variation": "N/A",
+    "power_dissipation": "0.035 @Room temp.",
+    "psrr_db": "-20@10 Hz"
+  },
+  "reference_10": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.2 - 3.0",
+    "active_area": "0.045",
+    "reference_voltage": "0.6",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "N/A",
+    "coefficient_of_variation": "N/A",
+    "power_dissipation": "N/A @Room temp.",
+    "psrr_db": "-45@100 Hz"
+  },
+  "reference_11": {
+    "cmos_technology": "0.35 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "1.4 - 3.0",
+    "active_area": "0.045",
+    "reference_voltage": "0.6",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "N/A",
+    "coefficient_of_variation": "0.745",
+    "power_dissipation": "N/A @Room temp.",
+    "psrr_db": "-52@100 Hz"
+  },
+  "reference_12": {
+    "cmos_technology": "0.13 um",
+    "type": {
+      "bg": "BG",
+      "sub_bg": "Sub-BG"
+    },
+    "supply_voltage": "0.5 - 3.0",
+    "active_area": "0.005",
+    "reference_voltage": "0.6",
+    "temperature_range": "-40 to 125",
+    "tc_ppm": "N/A",
+    "coefficient_of_variation": "0.87",
+    "power_dissipation": "0.000026 @Room temp.",
+    "psrr_db": "-62@100 Hz"
+  }
+}
+Thought: I see the titles to be this work, references [13] and [15] etc. Let me look up these paper titles first. To do this, first I need to know what [this work] is. To do so, i need to search this image in db, to get better query to search, i will summarize this image and use it as an query.
 
-Thought: I see references [13] and [15]. Let me look up these papers.
 
-Reasoning:
-1. Need full paper titles and details
-2. Will help understand circuit architectures
-3. Can find more detailed specifications
-
-Action: parse_references: [13, 15]
+Action: summary_generator.py: table_image_path
 PAUSE
 
-Observation: References found:
-[13] "Ultra-low power CMOS bandgap reference with improved PSR"
-[15] "A temperature-compensated sub-1V bandgap reference"
+Observation: Summary of the table image:
+Comparison table of CMOS technology reference circuits, including bandgap voltage (BG), sub-bandgap voltage (Sub-BG), and threshold voltage (V_TH) across various works. Key parameters include supply voltage, active area, reference voltage, temperature range, temperature coefficient (TC), coefficient of variation, power dissipation, and PSRR (power supply rejection ratio). Each work is compared across different CMOS technology nodes (0.18-µm, 0.35-µm, 0.6-µm, etc.).
 
-Thought: Let me get circuit details from these papers.
+Thought: I will now search  for this work paper title in db using the summary as a query.
 
-Action: search_paper_details: "Ultra-low power CMOS bandgap reference with improved PSR"
+Action: contextual_rag.py: summary
 PAUSE
 
-Observation: Circuit details for [13]:
-- Architecture: Modified bandgap with PSR enhancement
-- Core components: 8 MOSFETs, 3 resistors
-- Additional specs:
-  * PSR: -65dB at 100Hz
-  * Start-up time: 50μs
-  * Process: 180nm CMOS
+Observation: 
+
+Thought: I will now search  for this work paper title in db using the summary as a query.
 
 Action: search_paper_details: "A temperature-compensated sub-1V bandgap reference"
 PAUSE

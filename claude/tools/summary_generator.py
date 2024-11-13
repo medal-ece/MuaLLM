@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage
 import base64
 from dotenv import load_dotenv
 import os
+import argparse
 
 load_dotenv()
 
@@ -40,3 +41,25 @@ class SummaryGenerator:
             summary = self.generate_summary(image['path'])
             image['summary'] = summary
         return document
+    
+def main():
+    parser = argparse.ArgumentParser(description="Generate summary for an image")
+    parser.add_argument("-i", "--image", required=True, help="Path to the image file")
+    args = parser.parse_args()
+    
+    if not os.path.exists(args.image):
+        print(f"Error: Image file not found at {args.image}")
+        return
+    
+    try:
+        summary_generator = SummaryGenerator()
+        summary = summary_generator.generate_summary(args.image)
+        print(summary)
+        return summary
+        
+    except Exception as e:
+        print(f"Error generating summary: {e}")
+        return None
+
+if __name__ == "__main__":
+    summary = main()

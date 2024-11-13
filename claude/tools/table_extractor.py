@@ -168,6 +168,7 @@ def main():
         
         # Save results
         save_json_output(json_data, output_file)
+        return json_data
         
     except Exception as e:
         console.print(f"\n[bold red]Error:[/bold red] {str(e)}")

@@ -3,13 +3,20 @@ import pickle
 import json
 import numpy as np
 import voyageai
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Callable, Tuple
 from tqdm import tqdm
 from dotenv import load_dotenv
 import argparse
+import subprocess
 import sys
+import shutil
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+import cohere
+import time
 import datetime
 
 load_dotenv()
@@ -25,6 +32,7 @@ class ElasticsearchBM25:
             "settings": {
                 "analysis": {"analyzer": {"default": {"type": "english"}}},
                 "similarity": {"default": {"type": "BM25"}},
+                "index.queries.cache.enabled": False
             },
             "mappings": {
                 "properties": {
@@ -50,6 +58,8 @@ class ElasticsearchBM25:
                     "doc_id": doc["doc_id"],
                     "chunk_id": doc["chunk_id"],
                     "original_index": doc["original_index"],
+                    "type": doc["type"],
+                    "path": doc["path"]
                 },
             }
             for doc in documents
@@ -59,6 +69,7 @@ class ElasticsearchBM25:
         return success
 
     def search(self, query: str, k: int = 20) -> List[Dict[str, Any]]:
+        self.es_client.indices.refresh(index=self.index_name)
         search_body = {
             "query": {
                 "multi_match": {
@@ -79,6 +90,15 @@ class ElasticsearchBM25:
             for hit in response["hits"]["hits"]
         ]
 
+def chunk_to_content(chunk: Dict) -> str:
+    """Convert a chunk to its content string."""
+    # Check if it's an image chunk
+    if 'image_id' in chunk['metadata']:
+        return chunk['metadata'].get('summary', '') + '\n\n' + chunk['metadata'].get('context', '')
+    
+    # For text chunks, return the full content which includes both content and context
+    return chunk['metadata'].get('content', '')
+
 class VectorDB:
     def __init__(self, name: str, api_key = None):
         if api_key is None:
@@ -94,30 +114,97 @@ class VectorDB:
     def load_data(self, dataset: List[Dict[str, Any]]):
         texts_to_embed = []
         metadata = []
+        total_chunks = sum(len(doc['chunks']) for doc in dataset) + sum(len(doc['images']) for doc in dataset)
         
-        with tqdm(total=len(dataset), desc="Processing items") as pbar:
-            for item in dataset:
-                texts_to_embed.append(item['content'])
-                metadata.append(item['metadata'])
-                pbar.update(1)
+        # Process chunks and images
+        with tqdm(total=total_chunks, desc="Processing chunks and images") as pbar:
+            for doc in dataset:
+                
+                # Process text chunks
+                for chunk in doc['chunks']:
+                    # Combine title, content and context for text chunks
+                    combined_text = f"""
+Title: {chunk.get('document_title', '')}
+Content: {chunk['content']}
+Context: {chunk.get('context', '')}
+"""
+                    texts_to_embed.append(combined_text)
+                    metadata.append({
+                        'type': 'text',
+                        'content': chunk['content'],
+                        'context': chunk.get('context', ''),
+                        'title': chunk.get('document_title', ''),
+                        'combined_text': combined_text,
+                        'is_table': chunk.get('is_table', False),
+                        'table_type': chunk.get('table_type', None),
+                        
+                    })
+                    pbar.update(1)
+                
+                # Process images
+                for image in doc['images']:
+                    # Combine title and context for images
+                    combined_text = f"""
+Title: {image.get('document_title', '')}
+Content: {image.get('content', '')}
+Context: {image.get('context', '')}
+"""
+                    texts_to_embed.append(combined_text)
+                    metadata.append({
+                        'image_id': image['image_id'],
+                        'path': image['path'],
+                        'content': image.get('content', ''),
+                        'context': image.get('context', ''),
+                        'title': image.get('document_title', ''),
+                        'combined_text': combined_text,
+                        'is_table': image.get('is_table', False),
+                        'table_type': image.get('table_type', None),
+                        'type': 'image'
+                    })
+                    pbar.update(1)
 
+        # Embed and store data
         self._embed_and_store(texts_to_embed, metadata)
         
+        # Index documents in Elasticsearch
         documents = []
-        for item in dataset:
-            if item['metadata']['type'] == 'text':
+        for doc in dataset:
+            # Process text chunks
+            for chunk in doc['chunks']:
+                combined_text = f"""
+Title: {chunk.get('document_title', '')}
+Content: {chunk['content']}
+Context: {chunk.get('context', '')}
+"""
                 documents.append({
-                    'original_content': item['metadata']['content'],
-                    'contextualized_content': item['metadata']['combined_text'],
-                    'doc_id': item['id'],
-                    'chunk_id': item['id'],
-                    'original_index': metadata.index(item['metadata'])
+                    'original_content': chunk['content'],
+                    'contextualized_content': combined_text,
+                    'doc_id': doc['doc_id'],
+                    'chunk_id': chunk['chunk_id'],
+                    'type': 'text',
+                    'path': None
+                })
+            
+            # Process images
+            for image in doc['images']:
+                combined_text = f"""
+Title: {image.get('document_title', '')}
+Content: {image.get('content', '')}
+Context: {image.get('context', '')}
+"""
+                documents.append({
+                    'original_content': image.get('context', ''),
+                    'contextualized_content': combined_text,
+                    'doc_id': doc['doc_id'],
+                    'chunk_id': image['image_id'],
+                    'type': 'image',
+                    'path': image['path']
                 })
         
         self.es_bm25.index_documents(documents)
         self.save_db()
         
-        print(f"Database loaded with {len(texts_to_embed)} items")
+        print(f"Vector database loaded and saved. Total items processed: {len(texts_to_embed)}")
         print(f"Text chunks: {len([m for m in metadata if m['type'] == 'text'])}")
         print(f"Images: {len([m for m in metadata if m['type'] == 'image'])}")
 
@@ -135,6 +222,7 @@ class VectorDB:
         self.metadata = data
 
     def search(self, query: str, k: int = 20) -> List[Dict[str, Any]]:
+        # Get query embedding
         if query in self.query_cache:
             query_embedding = self.query_cache[query]
         else:
@@ -144,20 +232,91 @@ class VectorDB:
         if not self.embeddings:
             raise ValueError("No embeddings found. Please load data first.")
 
+        # Calculate cosine similarities
         similarities = np.dot(self.embeddings, query_embedding) / (
             np.linalg.norm(self.embeddings, axis=1) * np.linalg.norm(query_embedding)
         )
         
+        # Get top k indices
         top_k_indices = np.argsort(similarities)[-k:][::-1]
         
+        # Format results with full metadata
         results = []
         for idx in top_k_indices:
             results.append({
-                'metadata': self.metadata[idx],
-                'similarity': float(similarities[idx])
+                'metadata': {
+                    # Common fields for both types
+                    'doc_id': self.metadata[idx]['doc_id'],
+                    'original_uuid': self.metadata[idx]['original_uuid'],
+                    'type': self.metadata[idx]['type'],
+                    'title': self.metadata[idx]['title'],
+                    'content': self.metadata[idx]['content'],
+                    'context': self.metadata[idx]['context'],
+                    'combined_text': self.metadata[idx]['combined_text'],
+                    
+                    # Conditional fields based on type
+                    'chunk_id': self.metadata[idx].get('chunk_id'),
+                    'original_index': self.metadata[idx].get('original_index'),
+                    'image_id': self.metadata[idx].get('image_id'),
+                    'path': self.metadata[idx].get('path'),
+                },
+                'similarity': float(similarities[idx])  # Convert to float for JSON serialization
             })
         
         return results
+
+    def combine_results(self, semantic_results, bm25_results, k, 
+                       semantic_weight=0.8, bm25_weight=0.2):
+        combined_scores = {}
+        
+        # Process semantic results
+        for i, result in enumerate(semantic_results):
+            # Check if metadata exists and has required fields
+            if 'metadata' in result and 'doc_id' in result['metadata']:
+                doc_id = result['metadata']['doc_id']
+                combined_scores[doc_id] = {
+                    'score': semantic_weight * (1 / (i + 1)),
+                    'metadata': result['metadata'],
+                    'from_semantic': True,
+                    'from_bm25': False
+                }
+
+        # Process BM25 results
+        for i, result in enumerate(bm25_results):
+            doc_id = result['doc_id']
+            score = bm25_weight * (1 / (i + 1))
+            
+            if doc_id in combined_scores:
+                combined_scores[doc_id]['score'] += score
+                combined_scores[doc_id]['from_bm25'] = True
+            else:
+                # Find matching metadata from semantic results
+                matching_metadata = next(
+                    (r['metadata'] for r in semantic_results if r['metadata']['doc_id'] == doc_id),
+                    None
+                )
+                if matching_metadata:
+                    combined_scores[doc_id] = {
+                        'score': score,
+                        'metadata': matching_metadata,
+                        'from_semantic': False,
+                        'from_bm25': True
+                    }
+
+        # Sort by score and return top k results
+        sorted_results = sorted(
+            combined_scores.items(), 
+            key=lambda x: x[1]['score'], 
+            reverse=True
+        )[:k]
+        
+        return [
+            {
+                'metadata': item[1]['metadata'], 
+                'similarity': item[1]['score']
+            } 
+            for item in sorted_results
+        ]
 
     def save_db(self):
         data = {
@@ -171,7 +330,7 @@ class VectorDB:
 
     def load_db(self):
         if not os.path.exists(self.db_path):
-            raise ValueError("No database found. Use load_data to create a new database.")
+            raise ValueError("Vector database file not found. Use load_data to create a new database.")
         with open(self.db_path, "rb") as file:
             data = pickle.load(file)
         self.embeddings = data["embeddings"]
@@ -181,60 +340,257 @@ class VectorDB:
         print(f"Text chunks: {len([m for m in self.metadata if m['type'] == 'text'])}")
         print(f"Images: {len([m for m in self.metadata if m['type'] == 'image'])}")
 
-def transform_documents_to_db_format(json_file: str) -> List[Dict[str, Any]]:
-    with open(json_file, 'r') as f:
+    def search_with_rerank(self, query: str, k: int = 20) -> List[Dict[str, Any]]:
+        """Perform search with Cohere reranking."""
+        co = cohere.Client(os.getenv("COHERE_API_KEY"))
+        
+        # Get initial results
+        semantic_results = self.search(query, k=k*10)
+        
+        # Prepare documents for reranking
+        documents = [chunk_to_content(res) for res in semantic_results]
+
+        # Perform reranking
+        response = co.rerank(
+            model="rerank-english-v3.0",
+            query=query,
+            documents=documents,
+            top_n=k
+        )
+        time.sleep(0.1)  # Rate limiting
+        
+        # Process reranked results
+        final_results = []
+        for r in response.results:
+            original_result = semantic_results[r.index]
+            final_results.append({
+                "metadata": original_result['metadata'],
+                "similarity": r.relevance_score
+            })
+        
+        return final_results
+
+def process_pdfs(pdf_files: List[str]) -> str:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    pdf2json_path = os.path.join(current_dir, "pdf2json_chunked.py")
+    
+    cmd = [sys.executable, pdf2json_path] + pdf_files + ["-o", "../agent_db/data/data.json"]
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running pdf2json.py: {e}")
+        sys.exit(1)
+    
+    return "../agent_db/data/data.json"
+
+def extract_image(image_path: str, output_folder: str, model_info: str = None) -> Dict[str, str]:
+    """Extract image and return both path and model info"""
+    os.makedirs(output_folder, exist_ok=True)
+    filename = os.path.basename(image_path)
+    destination = os.path.join(output_folder, filename)
+    
+    try:
+        shutil.copy2(image_path, destination)
+        return {
+            "path": destination,
+            "model": model_info if model_info else "Unknown"
+        }
+    except FileNotFoundError:
+        return {
+            "path": f"Original image file not found: {image_path}",
+            "model": "Error"
+        }
+
+def perform_rag(search_query: str, search_results: List[Dict[str, Any]]) -> Tuple[str, List[str]]:
+    """
+    Perform RAG using combined semantic and BM25 search results.
+    Returns the generated response and list of images used.
+    """
+    context = ""
+    used_images = []
+    
+    for result in search_results:
+        try:
+            if 'metadata' not in result:
+                continue
+                
+            metadata = result['metadata']
+            if metadata.get('type') == 'text':
+                context += f"Text: {metadata.get('content', '')}\n\n"
+            elif metadata.get('type') == 'image':
+                image_path = metadata.get('path', '')
+                if image_path:
+                    used_images.append(image_path)
+                context += f"Image Summary: {metadata.get('summary', '')}\n\n"
+                
+            similarity = result.get('similarity', 0)
+            context += f"Relevance Score: {similarity:.4f}\n\n"
+            
+        except Exception as e:
+            print(f"Error processing result: {e}")
+            continue
+
+    prompt = ChatPromptTemplate.from_template(
+        """You are a helpful assistant. Use the provided context to answer the user's query.
+        If the answer is not in the context, say you don't know.
+        If you reference any figures or images in your response, please explicitly indicate 
+        which image file contains that figure (e.g., "This circuit is shown in <image_path>").
+
+        Context:
+        {context}
+
+        User Query: {query}
+
+        Assistant: Let me help you with that query based on the information I have."""
+    )
+
+    model = ChatOpenAI(temperature=0, model="gpt-4")
+    chain = prompt | model | StrOutputParser()
+    response = chain.invoke({"context": context, "query": search_query})
+
+    return response, used_images
+
+def evaluate_retrieval_rerank(queries: List[Dict[str, Any]], 
+                            retrieval_function: Callable, 
+                            db, 
+                            k: int = 20) -> Dict[str, float]:
+    """Evaluate retrieval with reranking."""
+    total_score = 0
+    total_queries = len(queries)
+    
+    for query_item in tqdm(queries, desc="Evaluating retrieval"):
+        query = query_item['query']
+        golden_chunk_uuids = query_item['golden_chunk_uuids']
+        
+        golden_contents = []
+        for doc_uuid, chunk_index in golden_chunk_uuids:
+            golden_doc = next((doc for doc in query_item['golden_documents'] 
+                             if doc['uuid'] == doc_uuid), None)
+            if golden_doc:
+                golden_chunk = next((chunk for chunk in golden_doc['chunks'] 
+                                   if chunk['index'] == chunk_index), None)
+                if golden_chunk:
+                    golden_contents.append(golden_chunk['content'].strip())
+        
+        if not golden_contents:
+            print(f"Warning: No golden contents found for query: {query}")
+            continue
+        
+        retrieved_docs = retrieval_function(query, db, k)
+        
+        chunks_found = 0
+        for golden_content in golden_contents:
+            for doc in retrieved_docs[:k]:
+                retrieved_content = doc['metadata']['original_content'].strip()
+                if retrieved_content == golden_content:
+                    chunks_found += 1
+                    break
+        
+        query_score = chunks_found / len(golden_contents)
+        total_score += query_score
+    
+    average_score = total_score / total_queries
+    pass_at_n = average_score * 100
+    return {
+        "pass_at_n": pass_at_n,
+        "average_score": average_score,
+        "total_queries": total_queries
+    }
+
+def manage_image_folder(folder: str):
+    """Clear existing image folder and create a new one"""
+    if os.path.exists(folder):
+        shutil.rmtree(folder)
+    os.makedirs(folder)
+
+def write_response_with_images(f, generated_response: str, extracted_images: List[Dict[str, Any]]):
+    """Write the response and copy referenced images to a special folder"""
+    # Create a folder for referenced images
+    referenced_images_dir = "referenced_images"
+    os.makedirs(referenced_images_dir, exist_ok=True)
+    
+    # Write the original response
+    f.write("\nGenerated Response:\n")
+    
+    # Find all image references in the response
+    referenced_files = []
+    for img in extracted_images:
+        if img['filename'] in generated_response:
+            src_path = os.path.join("extracted_images", img['filename'])
+            dest_path = os.path.join(referenced_images_dir, img['filename'])
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dest_path)
+                referenced_files.append(img['filename'])
+    
+    # Add image references to the response
+    modified_response = generated_response
+    if referenced_files:
+        modified_response += "\n\nReferenced Images:\n"
+        for img_file in referenced_files:
+            modified_response += f"\n- {img_file}"
+            
+    f.write(modified_response)
+
+def transform_documents_to_db_format(json_file: str) -> List[Dict]:
+    """Transform documents from JSON format to database format."""
+    with open(json_file, 'r', encoding='utf-8') as f:
         documents = json.load(f)
     
     transformed_data = []
     
     for doc in documents:
-        for chunk in doc['chunks']:
+        # Process text chunks
+        for chunk in doc.get('chunks', []):
+            # Combine title, content and context for better semantic search
             combined_text = f"""
+Title: {doc.get('title', '')}
 Content: {chunk['content']}
-Context: {chunk['context']}
+Context: {chunk.get('context', '')}
 """
             transformed_data.append({
                 'id': chunk['chunk_id'],
                 'type': 'text',
-                'content': combined_text,
+                'content': combined_text,  # Use combined text for embedding
                 'metadata': {
                     'type': 'text',
-                    'content': chunk['content'],
-                    'context': chunk['context'],
-                    'document_title': chunk['document_title'],
-                    'is_table': chunk['is_table'],
-                    'table_type': chunk['table_type'],
-                    'original_content': chunk['content'],
+                    'content': chunk['content'],  # Keep original content
+                    'context': chunk.get('context', ''),
+                    'document_title': doc.get('title', ''),
+                    'doc_id': doc['doc_id'],
+                    'chunk_id': chunk['chunk_id'],
+                    'is_table': chunk.get('is_table', False),
+                    'table_type': chunk.get('table_type', None),
                     'combined_text': combined_text
                 }
             })
         
-        if 'images' in doc:
-            for image in doc['images']:
-                combined_text = f"""
-Image Path: {image['path']}
+        # Process images
+        for image in doc.get('images', []):
+            # Combine title and context for images
+            combined_text = f"""
+Title: {doc.get('title', '')}
 Image Context: {image.get('context', '')}
 """
-                transformed_data.append({
-                    'id': image['image_id'],
+            transformed_data.append({
+                'id': image['image_id'],
+                'type': 'image',
+                'content': combined_text,  # Use combined text for embedding
+                'metadata': {
                     'type': 'image',
-                    'content': combined_text,
-                    'metadata': {
-                        'type': 'image',
-                        'path': image['path'],
-                        'summary': image.get('context', ''),
-                        'document_title': image.get('document_title', ''),
-                        'is_table': image.get('is_table', False),
-                        'table_type': image.get('table_type', None),
-                        'model_used': image.get('model_used', 'Unknown'),
-                        'combined_text': combined_text
-                    }
-                })
+                    'path': image['path'],
+                    'summary': image.get('context', ''),
+                    'document_title': doc.get('title', ''),
+                    'is_table': image.get('is_table', False),
+                    'table_type': image.get('table_type', None),
+                    'model_used': image.get('model_used', 'Unknown'),
+                    'combined_text': combined_text
+                }
+            })
     
     return transformed_data
 
-def save_results(results: List[Dict[str, Any]], query: str, output_file: str):
-    """Save search results to a JSON file"""
+def save_results(results: List[Dict], query: str, output_file: str) -> str:
+    """Save search results to a JSON file."""
     output_data = {
         "query": query,
         "timestamp": datetime.datetime.now().isoformat(),
@@ -278,174 +634,107 @@ def save_results(results: List[Dict[str, Any]], query: str, output_file: str):
     
     return output_path
 
-def extract_tables_from_paper(documents: List[Dict[str, Any]], paper_title: str) -> List[Dict[str, Any]]:
-    """
-    Extract all tables (both text-based and image-based) from a specific paper
-    Returns only items where is_table is True
-    """
-    tables = []
-    
-    for doc in documents:
-        if doc['title'].lower() == paper_title.lower():
-            # Extract text-based tables from chunks
-            for chunk in doc['chunks']:
-                if chunk.get('is_table') is True:  # Explicitly check for True
-                    tables.append({
-                        'type': 'text_table',
-                        'content': chunk['content'],
-                        'context': chunk['context'],
-                        'table_type': chunk.get('table_type', 'text_based'),
-                        'document_title': chunk['document_title']
-                    })
-            
-            # Extract image-based tables
-            if 'images' in doc:
-                for image in doc['images']:
-                    if image.get('is_table') is True:  # Explicitly check for True
-                        tables.append({
-                            'type': 'image_table',
-                            'path': image['path'],
-                            'context': image.get('context', ''),
-                            'table_type': image.get('table_type', 'image_based'),
-                            'document_title': image.get('document_title', '')
-                        })
-    
-    if not tables:
-        print(f"No tables (is_table: true) found in paper: {paper_title}")
-    else:
-        print(f"Found {len(tables)} tables (is_table: true) in paper: {paper_title}")
-    
-    return tables
-
-def save_table_results(tables: List[Dict[str, Any]], paper_title: str, output_file: str) -> str:
-    """Save extracted tables to a JSON file"""
-    output_data = {
-        "paper_title": paper_title,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "total_tables": len(tables),
-        "tables": []
-    }
-    
-    for i, table in enumerate(tables, 1):
-        table_entry = {
-            "table_number": i,
-            "type": table['type'],
-            "table_type": table['table_type']
-        }
-        
-        if table['type'] == 'text_table':
-            table_entry.update({
-                "content": table['content'],
-                "context": table['context']
-            })
-        else:  # image_table
-            table_entry.update({
-                "image_path": table['path'],
-                "context": table['context']
-            })
-            
-        output_data["tables"].append(table_entry)
-    
-    # Create results directory if it doesn't exist
-    os.makedirs("../agent_db/results", exist_ok=True)
-    
-    # Save to file
-    output_path = f"../agent_db/results/{output_file}"
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
-    
-    return output_path
-
 def main():
-    parser = argparse.ArgumentParser(description="Search vector database or extract tables from papers")
-    parser.add_argument("-i", "--input", required=False, help="Input JSON file path")
+    parser = argparse.ArgumentParser(description="Process PDF files, create a vector database, and perform searches")
+    parser.add_argument("-i", "--input", nargs="+", required=False, help="PDF files to process")
+    parser.add_argument("-o", "--output", default="../agent_db/results/retrieval.txt", help="Output file for search results")
     parser.add_argument("-q", "--query", required=False, help="Search query")
-    parser.add_argument("-k", "--top_k", type=int, default=5, help="Number of results to return")
-    parser.add_argument("-o", "--output", default="search_results.json", help="Output file name for results")
-    parser.add_argument("-t", "--tables", required=False, help="Extract tables from paper with given title")
+    parser.add_argument("-k", "--top_k", type=int, default=10, help="Number of top results to return")
     args = parser.parse_args()
 
-    if args.tables:
-        # Load documents directly for table extraction
-        try:
-            with open('../agent_db/documents.json', 'r') as f:
-                documents = json.load(f)
-            
-            tables = extract_tables_from_paper(documents, args.tables)
-            
-            if not tables:
-                print(f"No tables found in paper: {args.tables}")
-                return
-            
-            # Save and display results
-            output_file = f"tables_{args.tables.lower().replace(' ', '_')}.json"
-            output_path = save_table_results(tables, args.tables, output_file)
-            
-            print(f"\nFound {len(tables)} tables in paper: {args.tables}")
-            print(f"Results saved to: {output_path}\n")
-            
-            # Display table information
-            for i, table in enumerate(tables, 1):
-                print(f"\nTable {i}:")
-                print(f"Type: {table['type']}")
-                print(f"Table Type: {table['table_type']}")
-                
-                if table['type'] == 'text_table':
-                    print("Content:")
-                    print("-" * 40)
-                    print(table['content'][:200] + "..." if len(table['content']) > 200 else table['content'])
-                    print("-" * 40)
-                    print(f"Context: {table['context']}")
-                else:
-                    print(f"Image Path: {table['path']}")
-                    print(f"Context: {table['context']}")
-                print("-" * 80)
-            
-            return tables
-            
-        except FileNotFoundError:
-            print("Error: documents.json not found")
-            return
-        except json.JSONDecodeError:
-            print("Error: Invalid JSON format in documents.json")
-            return
-        except Exception as e:
-            print(f"Error: {e}")
-            return
-
-    # Existing search functionality
     base_db = VectorDB("base_db")
-    try:
-        base_db.load_db()
-        print("Loaded existing database")
-    except ValueError:
-        if args.input:
-            print("Creating new database")
-            transformed_dataset = transform_documents_to_db_format(args.input)
-            base_db.load_data(transformed_dataset)
-        else:
-            print("No existing database found and no input file provided")
+
+    if args.input:
+        json_file = process_pdfs(args.input)
+        # json_file = "../agent_db/documents.json"
+        with open(json_file, 'r') as f:
+            transformed_dataset = json.load(f)
+        print("Creating new vector database.")
+
+        base_db.load_data(transformed_dataset)
+    else:
+        try:
+            base_db.load_db()
+            print("Loaded existing vector database.")
+        except ValueError as e:
+            print(f"Error: {e}")
+            print("Please provide input PDFs to create a new database.")
             sys.exit(1)
 
     if args.query:
-        results = base_db.search(args.query, k=args.top_k)
-        output_path = save_results(results, args.query, args.output)
-        print(f"\nResults saved to: {output_path}")
+        search_query = args.query
+    else:
+        search_query = input("Enter your search query: ")
+
+    print(f"Searching for: {search_query}")
+    
+    # Use reranking for search
+    search_results = base_db.search_with_rerank(search_query, k=args.top_k)
+
+    # Perform RAG
+    generated_response, used_images = perform_rag(search_query, search_results)
+
+    # Clear and recreate image folder for new query
+    manage_image_folder("../agent_db/results/extracted_images")
+    
+    # Write results to output file
+    with open(args.output, "w") as f:
+        f.write(f"Query: {search_query}\n\n")
+        f.write("Search Results (with reranking):\n")
         
-        print(f"\nTop {args.top_k} results for query: {args.query}\n")
-        for i, result in enumerate(results, 1):
-            metadata = result['metadata']
-            print(f"\nResult {i} (Score: {result['similarity']:.4f}):")
-            print(f"Type: {metadata['type']}")
-            if metadata['type'] == 'text':
-                print(f"Content: {metadata['content'][:200]}...")
-                print(f"Context: {metadata['context']}")
-            else:
-                print(f"Image Path: {metadata['path']}")
-                print(f"Image Context: {metadata['summary']}")
-            print("-" * 80)
+        # Track extracted images and their usage
+        extracted_images = []
         
-        return results
+        for i, result in enumerate(search_results, 1):
+            f.write(f"{i}. ")
+            if result['metadata']['type'] == 'text':
+                combined_text = result['metadata']['combined_text']
+                content = combined_text[:500] + "..." \
+                    if len(combined_text) > 500 else combined_text
+                f.write(f"Text Content: {content}\n")
+            elif result['metadata']['type'] == 'image':
+                combined_text = result['metadata']['combined_text']
+                content = combined_text[:500] + "..." \
+                    if len(combined_text) > 500 else combined_text
+                f.write(f"Image Content: {content}\n")
+                
+                image_path = result['metadata']['path']
+                was_used = image_path in used_images
+                
+                extraction_result = extract_image(
+                    image_path,
+                    "extracted_images",
+                    result['metadata'].get('model_used', 'Unknown')
+                )
+                
+                extracted_images.append({
+                    "filename": os.path.basename(extraction_result["path"]),
+                    "model": extraction_result["model"],
+                    "used_in_response": was_used
+                })
+                
+                f.write(f"   Image extracted to: {extraction_result['path']}\n")
+                f.write(f"   Used in response: {'Yes' if was_used else 'No'}\n")
+            f.write(f"   Relevance Score: {result['similarity']:.4f}\n\n")
+        
+        # Write summary of extracted images
+        if extracted_images:
+            f.write("\nExtracted Images Summary:\n")
+            f.write("-" * 40 + "\n")
+            f.write("\nImages Used in Response:\n")
+            for img in extracted_images:
+                if img['used_in_response']:
+                    f.write(f"✓ {img['filename']}\n")
+            
+            f.write("\nImages Not Used in Response:\n")
+            for img in extracted_images:
+                if not img['used_in_response']:
+                    f.write(f"✗ {img['filename']}\n")
+            
+        # Write response with referenced images
+        write_response_with_images(f, generated_response, extracted_images)
+
+    print(f"Search results and generated response saved to {args.output}")
 
 if __name__ == "__main__":
-    results = main()
+    main()
