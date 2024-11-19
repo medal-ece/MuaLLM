@@ -1,67 +1,66 @@
+# using prompt caching to get the title of the paper from the reference number
+
 import anthropic
+import time
+import requests
+from bs4 import BeautifulSoup
 import os
-from typing import Optional
 import dotenv
+import json
+import argparse
 
 dotenv.load_dotenv()
 
-def get_reference_title(content: str, ref_number: int) -> Optional[str]:
-    """
-    Ask Claude to find the title of a specific reference number from a paper
-    """
-    # Initialize client with API key as a named parameter
-    client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
-    
-    prompt = f"""
-    From the following academic paper content, find the complete title of reference [{ref_number}].
-    Only return the title, nothing else. If the reference is not found, return "Reference not found".
+client = anthropic.Anthropic()
+MODEL_NAME = "claude-3-5-sonnet-20241022"
 
-    Paper content:
-    {content}
-    """
-    
-    try:
-        message = client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=1024,
-            temperature=0,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
-        return message.content[0].text.strip()
-        
-    except Exception as e:
-        print(f"Error querying Claude: {e}")
-        return None
+# api call
+def ask_claude(document_content, reference_number):
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "<document>" + document_content + "</document>",
+                    "cache_control": {"type": "ephemeral"}
+                },
+                {
+                    "type": "text",
+                    "text": "What is the title of the reference paper " + reference_number + " in the document? Only output the title."
+                }
+            ]
+        }
+    ]
+    start_time = time.time()
+    response = client.messages.create(
+        model=MODEL_NAME,
+        max_tokens=300,
+        messages=messages,
+        extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
+
+    )
+    return response
 
 def main():
-    # Read the paper content from documents.json
-    import json
-    
-    try:
-        with open('../agent_db/documents.json', 'r') as f:
-            documents = json.load(f)
-            
-        # Combine all chunks' content
-        paper_content = documents[0]['content']
-        
-        # Get reference title
-        ref_title = get_reference_title(paper_content, 13)
-        
-        if ref_title:
-            print("\nReference [13] Title:")
-            print(ref_title)
-        else:
-            print("Could not find reference title")
-            
-    except FileNotFoundError:
-        print("Error: documents.json not found")
-    except json.JSONDecodeError:
-        print("Error: Invalid JSON format in documents.json")
-    except Exception as e:
-        print(f"Error: {e}")
+    # get the document id from the command line
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--doc_id", type=str, required=True)  
+    parser.add_argument("--reference_number", type=str, required=True)
+    args = parser.parse_args()
+    doc_id = args.doc_id
+    reference_number = args.reference_number
+    # get the document content from the documents.json file
+    with open("../agent_db/documents.json", "r") as f:
+        documents = json.load(f)
+    document_content = next((doc for doc in documents if doc["doc_id"] == doc_id), None)["content"]
+    response = ask_claude(document_content, reference_number)
+    print(f"cached API call input tokens: {response.usage.input_tokens}")
+    print(f"cached API call output tokens: {response.usage.output_tokens}")
+
+    print("\nSummary (cached):")
+    print(response.content[0].text)
+
 
 if __name__ == "__main__":
     main()

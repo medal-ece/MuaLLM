@@ -27,3 +27,5 @@ numpy
 PyPDF2
 cohere
 pytesseract
+bs4
+anthropic

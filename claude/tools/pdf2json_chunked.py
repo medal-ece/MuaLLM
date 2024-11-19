@@ -127,22 +127,21 @@ async def main():
     parser.add_argument("-i", "--image_dir", default="../agent_db/images", help="Directory to save extracted images")
     args = parser.parse_args()
 
-    # Load existing documents if file exists
-    documents = []
+    # Get next document ID and image number from existing documents
+    next_doc_id = 1
+    start_number = 1
+    existing_docs = []
+    
     if os.path.exists(args.output):
         with open(args.output, 'r', encoding='utf-8') as f:
             try:
-                documents = json.load(f)
+                existing_docs = json.load(f)
+                if existing_docs:
+                    # Get highest doc_id
+                    next_doc_id = max([int(doc['doc_id'].split('_')[1]) for doc in existing_docs]) + 1
             except json.JSONDecodeError:
                 print(f"Warning: Could not parse existing {args.output}, starting fresh")
-
-    # Get next document ID and image number
-    next_doc_id = 1
-    start_number = 1
     
-    if documents:
-        next_doc_id = max([int(doc['doc_id'].split('_')[1]) for doc in documents]) + 1
-        
     # Find highest existing image number
     if os.path.exists(args.image_dir):
         existing_images = glob.glob(os.path.join(args.image_dir, 'image_*'))
@@ -153,24 +152,27 @@ async def main():
             ]) + 1
 
     processor = PDFProcessor(args.image_dir)
-
+    
     # Process new documents
+    new_documents = []  # Only store new documents
     with Progress() as progress:
         pdf_task = progress.add_task("[cyan]Processing PDFs...", total=len(args.pdf_files))
         
         for i, pdf_file in enumerate(args.pdf_files, start=next_doc_id):
             process_task = progress.add_task(f"[cyan]Processing {os.path.basename(pdf_file)}...", total=100)
             document, num_images = await processor.process_pdf(pdf_file, i, start_number, process_task, progress)
-            documents.append(document)
+            new_documents.append(document)
             start_number += num_images
             progress.update(pdf_task, advance=1)
             progress.remove_task(process_task)
 
-    # Save output
+    # Save only new documents to output
     with open(args.output, 'w', encoding='utf-8') as f:
-        json.dump(documents, f, ensure_ascii=False, indent=2)
+        json.dump(new_documents, f, ensure_ascii=False, indent=2)
 
-    print(f"\nProcessed {len(documents)} PDF files. Output saved to {args.output}")
+    print(f"\nProcessed {len(new_documents)} new PDF files. Output saved to {args.output}")
+    print(f"Document IDs start from {next_doc_id}")
+    print(f"Image numbers start from {start_number}")
     print(f"Extracted images have been saved to {args.image_dir}")
 
 if __name__ == "__main__":
