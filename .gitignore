@@ -34,3 +34,5 @@ table_db/
 table_results/
 agent_db/
 output/
+context_output.txt
+query_results/

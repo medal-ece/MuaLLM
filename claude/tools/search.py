@@ -35,7 +35,7 @@ class ContextualVectorDB:
         self.embeddings=[]
         self.metadata=[]
         self.query_cache={}
-        self.db_path= f"../agent_db/{name}/vector_db.pkl"
+        self.db_path= f"/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/base_db/vector_db.pkl"
         self.token_counts={
             'input': 0,
             'output': 0,
@@ -64,7 +64,7 @@ class ContextualVectorDB:
         </chunk>
 
         Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
-        Answer only with the succinct context and nothing else.
+        Answer only with the succinct context , mention the title of the document and nothing else.
         """
         try:
             response = self.anthropic_client.beta.prompt_caching.messages.create(
@@ -99,8 +99,7 @@ class ContextualVectorDB:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         reraise=True
     )
-    def situate_image_context(self,doc:str, base64_image:str) -> tuple[str, Any]:
-
+    def situate_image_context(self, doc: str, base64_image: str) -> tuple[str, Any]:
         DOCUMENT_CONTEXT_PROMPT = """
         <document>
         {doc_content}
@@ -108,14 +107,18 @@ class ContextualVectorDB:
         """
 
         IMAGE_CONTEXT_PROMPT = """
-        Here is the image we want to situate within the whole document
-        <image>
-        {base64_image}
-        </image>
-
-        Please give a short succinct context to situate this image within the overall document for the purposes of improving search retrieval of the image.
-        Answer only with the succinct context and nothing else.
+        Please provide a detailed description of this image that would help in search retrieval. Your description should:
+        1. Start with the type of image (e.g., "Schematic diagram", "Circuit diagram", "Graph", "Plot", "Illustration")
+        2. Describe the key visual elements and their relationships
+        3. Mention any text, labels, or annotations visible in the image
+        4. Note any technical components or symbols if present
+        5. Explain what concept or system this image is depicting
+        6. Mention the title of the document
+        
+        Format your response as a clear, detailed paragraph that would help someone find this image when searching.
+        Focus on being specific and technical rather than general.
         """
+
         try:
             response = self.anthropic_client.beta.prompt_caching.messages.create(
                 model="claude-3-haiku-20240307",
@@ -128,18 +131,29 @@ class ContextualVectorDB:
                             {
                                 "type": "text",
                                 "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=doc),
-                                "cache_control": {"type": "ephemeral"} #we will make use of prompt caching for the full documents
+                                "cache_control": {"type": "ephemeral"}
                             },
                             {
-                                "type": "text",
-                                "text": IMAGE_CONTEXT_PROMPT.format(base64_image=base64_image),
+                                "type": "image", 
+                                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_image}
                             },
+                            {
+                                "type": "text", 
+                                "text": IMAGE_CONTEXT_PROMPT
+                            }
                         ]
                     },
                 ],
                 extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
-            return response.content[0].text, response.usage
+            
+            context = response.content[0].text
+            print("\n=== Image Context Generated ===")
+            print(f"Context: {context}")
+            print("==============================\n")
+            
+            return context, response.usage
+            
         except anthropic.RateLimitError:
             print("Rate limit hit, waiting 60 seconds...")
             time.sleep(60)
@@ -477,24 +491,24 @@ def retrieve_advanced(query: str, db: ContextualVectorDB, es_bm25: ElasticSearch
         score = 0
         if item_id in ranked_ids:
             index = ranked_ids.index(item_id)
-            score += semantic_weight * (1 / (index + 1))  # Weighted 1/n scoring for semantic
+            score += semantic_weight * (1 / (index + 1))
         if item_id in ranked_bm25_ids:
             index = ranked_bm25_ids.index(item_id)
-            score += bm25_weight * (1 / (index + 1))  # Weighted 1/n scoring for BM25
+            score += bm25_weight * (1 / (index + 1))
         item_id_to_score[item_id] = score
 
-    # Sort IDs by their scores in descending order
+    # Sort IDs by their scores
     sorted_ids = sorted(
         item_id_to_score.keys(), 
         key=lambda x: (item_id_to_score[x], x[1], x[2]), 
         reverse=True
     )
 
-    # Assign new scores based on the sorted order
+    # Assign new scores based on sorted order
     for index, item_id in enumerate(sorted_ids):
         item_id_to_score[item_id] = 1 / (index + 1)
 
-    # Prepare the final results
+    # Prepare final results
     final_results = []
     semantic_count = 0
     bm25_count = 0
@@ -502,40 +516,51 @@ def retrieve_advanced(query: str, db: ContextualVectorDB, es_bm25: ElasticSearch
     for item_id in sorted_ids[:k]:
         content_type, doc_id, sub_id = item_id
         
-        # Find matching metadata
-        if content_type == 'text':
-            item_metadata = next(
-                item for item in db.metadata 
-                if 'chunk_id' in item 
-                and item['doc_id'] == doc_id 
-                and item['original_index'] == sub_id
-            )
-        else:  # image
-            item_metadata = next(
-                item for item in db.metadata 
-                if 'image_id' in item 
-                and item['doc_id'] == doc_id 
-                and item['image_id'] == sub_id
-            )
+        try:
+            # Find matching metadata
+            if content_type == 'text':
+                item_metadata = next(
+                    (item for item in db.metadata 
+                    if 'chunk_id' in item 
+                    and item['doc_id'] == doc_id 
+                    and item['original_index'] == sub_id),
+                    None
+                )
+            else:  # image
+                item_metadata = next(
+                    (item for item in db.metadata 
+                    if 'image_id' in item 
+                    and item['doc_id'] == doc_id 
+                    and item['image_id'] == sub_id),
+                    None
+                )
 
-        is_from_semantic = item_id in ranked_ids
-        is_from_bm25 = item_id in ranked_bm25_ids
-        
-        final_results.append({
-            'item': item_metadata,
-            'content_type': content_type,
-            'score': item_id_to_score[item_id],
-            'from_semantic': is_from_semantic,
-            'from_bm25': is_from_bm25
-        })
-        
-        if is_from_semantic and not is_from_bm25:
-            semantic_count += 1
-        elif is_from_bm25 and not is_from_semantic:
-            bm25_count += 1
-        else:  # it's in both
-            semantic_count += 0.5
-            bm25_count += 0.5
+            # Skip if metadata not found
+            if item_metadata is None:
+                continue
+
+            is_from_semantic = item_id in ranked_ids
+            is_from_bm25 = item_id in ranked_bm25_ids
+            
+            final_results.append({
+                'item': item_metadata,
+                'content_type': content_type,
+                'score': item_id_to_score[item_id],
+                'from_semantic': is_from_semantic,
+                'from_bm25': is_from_bm25
+            })
+            
+            if is_from_semantic and not is_from_bm25:
+                semantic_count += 1
+            elif is_from_bm25 and not is_from_semantic:
+                bm25_count += 1
+            else:  # it's in both
+                semantic_count += 0.5
+                bm25_count += 0.5
+
+        except Exception as e:
+            print(f"Warning: Error processing item {item_id}: {str(e)}")
+            continue
 
     return final_results, semantic_count, bm25_count
 
@@ -569,32 +594,45 @@ def retrieve_rerank(query: str, db, es_bm25, k: int) -> List[Dict[str, Any]]:
     
     return final_results
 
-def main():
-    parser = argparse.ArgumentParser(description="Search the vector database")    
-    parser.add_argument("--load_data", action="store_true", help="Load data from json file and save to new vector database")
-    parser.add_argument("--query", type=str, help="Search query", default="give me the schematic diagram image of a PTAT voltage generator")
-    args = parser.parse_args()
-    
-    if args.load_data:
-        with open("../agent_db/documents.json", "r") as f:
+def main(query: str = None, load_data: bool = False):
+    """
+    Main function to search or load data into the vector database
+    Args:
+        query: The search query string (optional)
+        load_data: If True, load new data into DB. If False, use existing DB
+    Returns:
+        List of search results if query is provided
+    """
+    if load_data:
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/documents.json", "r") as f:
             dataset = json.load(f)
         vector_db = ContextualVectorDB("base_db")
         vector_db.load_data(dataset)
-    else:
+        
+    
+    if query:
         vector_db = ContextualVectorDB("base_db")
         vector_db.load_db()
-    
-    query = args.query
-    es_bm25 = create_elasticsearch_bm25_index(vector_db)
-    results = retrieve_rerank(query, vector_db, es_bm25, 20)
-    
-    # Write results to a json file
-    with open("../agent_db/results.json", "w") as f:
-        json.dump(results, f, indent=4)
-    print(f"\nSearch results saved to ../agent_db/results.json")
+        
+        es_bm25 = create_elasticsearch_bm25_index(vector_db)
+        results = retrieve_rerank(query, vector_db, es_bm25, 10)
+        
+        # Write results to a json file
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/results.json", "w") as f:
+            json.dump(results, f, indent=4)
+        # save images to a folder
+        
+        
+        return results
 
+# Keep this for direct script execution, but use the new main function
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Search the vector database")    
+    parser.add_argument("--load_data", action="store_true", help="Load data from json file and save to new vector database")
+    parser.add_argument("--query", type=str, help="Search query", default="give me the schematic diagram of a PTAT voltage generator")
+    args = parser.parse_args()
+    
+    main(query=args.query, load_data=args.load_data)
         
 
 
