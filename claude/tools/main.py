@@ -4,6 +4,7 @@ from anthropic import Anthropic
 from search import main as search_main
 from pathlib import Path
 import shutil
+import json
 
 def load_image(image_path: str) -> str:
     """Load and encode image as base64"""
@@ -65,11 +66,10 @@ def answer_query(query: str, results, k: int = 5) -> str:
         "Important instructions:\n"
         "1. Structure your response in a clear, readable format using appropriate headings and bullet points where necessary.\n"
         "2. Only reference images that are directly relevant to the query as 'Image N' and explain their significance.\n"
-        "3. Do not mention irrelevant images in your response.\n"
+        "3. Don't forget to mention the images that you used in your response. Mention all the images that you used in your response.\n"
         "4. Use both the provided text references and image content to create a comprehensive answer.\n"
         "5. Format your response with:\n"
         "   - A generated response using the provided text references and image content\n"
-        "   - A conclusion that summarizes the main points and findings\n\n"
     )
     
     if text_contents:
@@ -140,6 +140,16 @@ def main():
     
     # Get search results from search.py
     results = search_main(query)
+    # # Save search results to a file
+    # with open('query_results/search_results.json', 'w', encoding='utf-8') as f:
+    #     json.dump(results, f, indent=4)
+    #     for result in results:
+    #         if 'path' in result['item']:
+    #             f.write(f"{result['item']['path']}\n")
+    #             f.write(f"{result['item'].get('contextualized_content', '')}\n")
+    #         else:
+    #             f.write(f"{result['item'].get('original_content', '')}\n")
+    #             f.write(f"{result['item'].get('contextualized_content', '')}\n")
     
     # Get detailed answer using Claude
     answer = answer_query(query, results, k=10)
