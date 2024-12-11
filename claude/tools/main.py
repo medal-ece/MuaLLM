@@ -5,6 +5,9 @@ from search import main as search_main
 from pathlib import Path
 import shutil
 import json
+import argparse
+import asyncio
+from pdf2json_chunked import main as pdf_process
 
 def load_image(image_path: str) -> str:
     """Load and encode image as base64"""
@@ -68,8 +71,6 @@ def answer_query(query: str, results, k: int = 5) -> str:
         "2. Only reference images that are directly relevant to the query as 'Image N' and explain their significance.\n"
         "3. Don't forget to mention the images that you used in your response. Mention all the images that you used in your response.\n"
         "4. Use both the provided text references and image content to create a comprehensive answer.\n"
-        "5. Format your response with:\n"
-        "   - A generated response using the provided text references and image content\n"
     )
     
     if text_contents:
@@ -126,8 +127,24 @@ def answer_query(query: str, results, k: int = 5) -> str:
     
     return response_text
 
-def main():
-    # Get query from user input
+async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pdf", nargs="*", help="PDF files to process")
+    parser.add_argument("--chunked", action="store_true", help="Use chunked PDF processing")
+    parser.add_argument("--load_data", action="store_true", help="Load data from json file and save to new or existing vector database")
+    args = parser.parse_args()
+
+    # Process PDFs if specified
+    if args.pdf and args.chunked:
+        print("\nProcessing PDF files...")
+        await pdf_process(
+            pdf_files=args.pdf,
+            output_path="../agent_db/documents.json",
+            image_dir="../agent_db/images"
+        )
+        print("PDF processing complete.")
+
+    # Continue with query processing
     print("\nEnter your query (press Enter to submit):")
     query = input("> ").strip()
     
@@ -138,18 +155,11 @@ def main():
     
     print("\nProcessing query...")
     
-    # Get search results from search.py
-    results = search_main(query)
-    # # Save search results to a file
-    # with open('query_results/search_results.json', 'w', encoding='utf-8') as f:
-    #     json.dump(results, f, indent=4)
-    #     for result in results:
-    #         if 'path' in result['item']:
-    #             f.write(f"{result['item']['path']}\n")
-    #             f.write(f"{result['item'].get('contextualized_content', '')}\n")
-    #         else:
-    #             f.write(f"{result['item'].get('original_content', '')}\n")
-    #             f.write(f"{result['item'].get('contextualized_content', '')}\n")
+    # Get search results from search.py with explicit paths
+    results = search_main(
+        query=query, 
+        load_data=args.load_data,
+    )
     
     # Get detailed answer using Claude
     answer = answer_query(query, results, k=10)
@@ -160,4 +170,4 @@ def main():
     return answer
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

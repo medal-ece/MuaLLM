@@ -96,7 +96,7 @@ class PDFProcessor:
                 new_path = os.path.join(self.image_dir, new_name)
                 
                 # Ensure relative path in JSON
-                json_path = os.path.join("../agent_db/images", new_name)
+                json_path = os.path.join("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/images/", new_name)
                 
                 shutil.move(image_file, new_path)
                 images.append({
@@ -119,46 +119,49 @@ class PDFProcessor:
         }
 
         return document, len(images)
+# In pdf2json_chunked.py
 
-async def main():
-    parser = argparse.ArgumentParser(description="Process PDF files into JSON format")
-    parser.add_argument("pdf_files", nargs="+", help="PDF files to process")
-    parser.add_argument("-o", "--output", default="../agent_db/documents.json", help="Output JSON file")
-    parser.add_argument("-i", "--image_dir", default="../agent_db/images", help="Directory to save extracted images")
-    args = parser.parse_args()
-
+async def main(pdf_files, output_path="../agent_db/documents.json", image_dir="../agent_db/images"):
+    """
+    Process PDF files into JSON format
+    
+    Args:
+        pdf_files (list): List of PDF file paths to process
+        output_path (str): Path to output JSON file
+        image_dir (str): Directory to save extracted images
+    """
+    # Remove the argparse code since we're passing parameters directly
+    
     # Get next document ID and image number from existing documents
     next_doc_id = 1
     start_number = 1
     existing_docs = []
     
-    if os.path.exists(args.output):
-        with open(args.output, 'r', encoding='utf-8') as f:
+    if os.path.exists(output_path):
+        with open(output_path, 'r', encoding='utf-8') as f:
             try:
                 existing_docs = json.load(f)
                 if existing_docs:
-                    # Get highest doc_id
                     next_doc_id = max([int(doc['doc_id'].split('_')[1]) for doc in existing_docs]) + 1
             except json.JSONDecodeError:
-                print(f"Warning: Could not parse existing {args.output}, starting fresh")
-    
+                print(f"Warning: Could not parse existing {output_path}, starting fresh")
     # Find highest existing image number
-    if os.path.exists(args.image_dir):
-        existing_images = glob.glob(os.path.join(args.image_dir, 'image_*'))
+    if os.path.exists(image_dir):
+        existing_images = glob.glob(os.path.join(image_dir, 'image_*'))
         if existing_images:
             start_number = max([
                 int(os.path.splitext(os.path.basename(f))[0].split('_')[1]) 
                 for f in existing_images
             ]) + 1
 
-    processor = PDFProcessor(args.image_dir)
+    processor = PDFProcessor(image_dir)
     
     # Process new documents
     new_documents = []  # Only store new documents
     with Progress() as progress:
-        pdf_task = progress.add_task("[cyan]Processing PDFs...", total=len(args.pdf_files))
+        pdf_task = progress.add_task("[cyan]Processing PDFs...", total=len(pdf_files))
         
-        for i, pdf_file in enumerate(args.pdf_files, start=next_doc_id):
+        for i, pdf_file in enumerate(pdf_files, start=next_doc_id):
             process_task = progress.add_task(f"[cyan]Processing {os.path.basename(pdf_file)}...", total=100)
             document, num_images = await processor.process_pdf(pdf_file, i, start_number, process_task, progress)
             new_documents.append(document)
@@ -167,13 +170,13 @@ async def main():
             progress.remove_task(process_task)
 
     # Save only new documents to output
-    with open(args.output, 'w', encoding='utf-8') as f:
+    with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(new_documents, f, ensure_ascii=False, indent=2)
 
-    print(f"\nProcessed {len(new_documents)} new PDF files. Output saved to {args.output}")
+    print(f"\nProcessed {len(new_documents)} new PDF files. Output saved to {output_path}")
     print(f"Document IDs start from {next_doc_id}")
     print(f"Image numbers start from {start_number}")
-    print(f"Extracted images have been saved to {args.image_dir}")
+    print(f"Extracted images have been saved to {image_dir}")
 
 if __name__ == "__main__":
     asyncio.run(main())

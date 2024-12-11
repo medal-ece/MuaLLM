@@ -62,7 +62,7 @@ class ContextualVectorDB:
         <chunk>
         {chunk_content}
         </chunk>
-
+        Start with this text is from the document title  Example: "This text is from the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
         Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
         Answer only with the succinct context , mention the title of the document and nothing else.
         """
@@ -89,6 +89,7 @@ class ContextualVectorDB:
                 ],
                 extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
+               
             return response.content[0].text, response.usage
         except anthropic.RateLimitError:
             print("Rate limit hit, waiting 60 seconds...")
@@ -99,7 +100,7 @@ class ContextualVectorDB:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         reraise=True
     )
-    def situate_image_context(self, doc: str, base64_image: str) -> tuple[str, Any]:
+    def situate_image_context(self, doc: str,path: str, base64_image: str) -> tuple[str, Any]:
         DOCUMENT_CONTEXT_PROMPT = """
         <document>
         {doc_content}
@@ -108,12 +109,13 @@ class ContextualVectorDB:
 
         IMAGE_CONTEXT_PROMPT = """
         Please provide a detailed description of this image that would help in search retrieval. Your description should:
-        1. Start with the type of image (e.g., "Schematic diagram", "Circuit diagram", "Graph", "Plot", "Illustration")
-        2. Describe the key visual elements and their relationships
-        3. Mention any text, labels, or annotations visible in the image
-        4. Note any technical components or symbols if present
-        5. Explain what concept or system this image is depicting
-        6. Mention the title of the document
+        1. Start with this image is from the document title  Example: "This image is from the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
+        2. Mention the type of image (e.g., "Schematic diagram", "Circuit diagram", "Graph", "Plot", "Illustration")
+        3. Describe the key visual elements and their relationships
+        4. Mention any text, labels, or annotations visible in the image
+        5. Note any technical components or symbols if present
+        6. Explain what concept or system this image is depicting
+        
         
         Format your response as a clear, detailed paragraph that would help someone find this image when searching.
         Focus on being specific and technical rather than general.
@@ -148,9 +150,6 @@ class ContextualVectorDB:
             )
             
             context = response.content[0].text
-            print("\n=== Image Context Generated ===")
-            print(f"Context: {context}")
-            print("==============================\n")
             
             return context, response.usage
             
@@ -199,7 +198,7 @@ class ContextualVectorDB:
                         doc, image = item
                         time.sleep(3)  # Longer delay between requests
                         base64_image = self.encode_image(image["path"])
-                        contextualized_text, usage = self.situate_image_context(doc["content"], base64_image)
+                        contextualized_text, usage = self.situate_image_context(doc["content"],image["path"], base64_image)
                         with self.token_lock:
                             self.token_counts['input'] += usage.input_tokens
                             self.token_counts['cache_read'] += usage.cache_read_input_tokens
@@ -609,6 +608,33 @@ def main(query: str = None, load_data: bool = False):
         vector_db = ContextualVectorDB("base_db")
         vector_db.load_data(dataset)
         
+        # Write content and contextualized content to context.json
+        context_data = []
+        for item in vector_db.metadata:
+            context_entry = {
+                "doc_id": item["doc_id"]
+            }
+            
+            if "chunk_id" in item:  # Text content
+                context_entry.update({
+                    "type": "text",
+                    "content": item["original_content"],
+                    "contextualized_content": item["contextualized_content"],
+                    "chunk_id": item["chunk_id"]
+                })
+            else:  # Image content
+                context_entry.update({
+                    "type": "image",
+                    "image_id": item["image_id"],
+                    "path": item["path"],
+                    "contextualized_content": item["contextualized_content"]
+                })
+            
+            context_data.append(context_entry)
+            
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/context.json", "w") as f:
+            json.dump(context_data, f, indent=4)
+        print("Context data saved to context.json")
     
     if query:
         vector_db = ContextualVectorDB("base_db")
@@ -634,5 +660,4 @@ if __name__ == "__main__":
     
     main(query=args.query, load_data=args.load_data)
         
-
 
