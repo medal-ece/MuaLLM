@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
 from tenacity import retry, stop_after_attempt, wait_exponential
 import cohere
+from fullcontext import fullcontext
 
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
@@ -281,14 +282,31 @@ class ContextualVectorDB:
         self.metadata = data
 
     def save_db(self):
-        data={
-            "embeddings": self.embeddings,
-            "metadata": self.metadata,
-            "query_cache": json.dumps(self.query_cache),
+        # Load existing data if present
+        existing_data = {}
+        if os.path.exists(self.db_path):
+            with open(self.db_path, "rb") as f:
+                try:
+                    existing_data = pickle.load(f)
+                except Exception as e:
+                    print(f"Warning: Could not load existing database: {e}")
+        
+        # Combine existing and new data
+        data = {
+            "embeddings": existing_data.get("embeddings", []) + self.embeddings,
+            "metadata": existing_data.get("metadata", []) + self.metadata,
+            "query_cache": json.dumps({
+                **json.loads(existing_data.get("query_cache", "{}")),
+                **self.query_cache
+            })
         }
+        
+        # Save combined data
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         with open(self.db_path, "wb") as f:
             pickle.dump(data, f)
+        
+        print(f"Database saved with {len(data['embeddings'])} total embeddings")
 
     def load_db(self):
         if not os.path.exists(self.db_path):
@@ -590,7 +608,6 @@ def retrieve_rerank(query: str, db, es_bm25, k: int) -> List[Dict[str, Any]]:
             "from_semantic": original_result['from_semantic'],
             "from_bm25": original_result['from_bm25']
         })
-    
     return final_results
 
 def main(query: str = None, load_data: bool = False):
@@ -603,8 +620,37 @@ def main(query: str = None, load_data: bool = False):
         List of search results if query is provided
     """
     if load_data:
+
+        # Load existing content if file exists
+        existing_content = {}
+        pdf_content_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/pdf_content.json"
+
+        try:
+            if os.path.exists(pdf_content_path) and os.path.getsize(pdf_content_path) > 0:
+                with open(pdf_content_path, "r") as f:
+                    existing_content = json.load(f)
+            else:
+                print(f"Creating new pdf_content.json file")
+        except json.JSONDecodeError:
+            print(f"Warning: Could not parse existing {pdf_content_path}, starting fresh")
+        except Exception as e:
+            print(f"Error reading {pdf_content_path}: {str(e)}, starting fresh")
+
+        # Load and process new documents
         with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/documents.json", "r") as f:
             dataset = json.load(f)
+
+        # Get titles for new documents and update the content dictionary
+        for item in dataset:
+            title = fullcontext("What is the title of the document?, just give me the title nothing else, no other text", item["content"])
+            item["title"] = title
+            # Only add if title doesn't exist
+            if title not in existing_content:
+                existing_content[title] = item["content"]
+
+        # Save updated content back to file
+        with open(pdf_content_path, "w") as f:
+            json.dump(existing_content, f, indent=4)
         vector_db = ContextualVectorDB("base_db")
         vector_db.load_data(dataset)
         
@@ -644,7 +690,7 @@ def main(query: str = None, load_data: bool = False):
         results = retrieve_rerank(query, vector_db, es_bm25, 10)
         
         # Write results to a json file
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/results.json", "w") as f:
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/search_results.json", "w") as f:
             json.dump(results, f, indent=4)
         # save images to a folder
         
