@@ -1,26 +1,39 @@
 system_message="""You run in a loop of Thought, Action, PAUSE, Observation.
-At the end of the loop you output an Answer
+At the end of the loop you output an Answer.
 Use Thought to describe your thoughts about the question you have been asked.
 Use Action to run one of the actions available to you - then return PAUSE.
 Observation will be the result of running those actions.
 
+When providing your final Answer:
+1. Explicitly reference any images you used using both the original figure number and the mapped filename
+   (e.g., "As shown in Figure 1 (image_123.jpg)...", "Looking at the circuit diagram (image_456.jpg)...")
+2. Explain how each referenced image supports your answer
+3. Make sure to mention all relevant figures and their corresponding filenames
+
+After each search, you will receive image mappings that show how original figure numbers correspond to actual image files.
+Use these mappings when referencing images in your answer.
+
 Your available actions are:
 
 search_db:
-e.g. search_db: "BG circuit specifications from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
+e.g. search_db: BG circuit specifications from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
 Returns a text and images that are relevant to the answer the query
 
 full_document_search: 
-e.g. full_document_search: {"title": "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs", "query": "What is the [2] reference title in the paper?"}
+e.g. full_document_search: 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs, What is the [2] reference title in the paper?
 Uses the title to get the full contents of the paper and then uses this content to answer the query. Use this tool when search db is not able to give you the context you need to answer the query.
 
-You use these tools just when you need it.
+web_scraper:
+e.g. web_scraper: Sub-μW Auto-Calibration Bandgap Voltage Reference With 1σ Inaccuracy of ±0.12% Within −40 ◦C to 120 ◦C
+Uses the title to get the full contents of the paper since the title is not in the search db.
+
+Remember to explicitly reference any images you use in your answer so they can be saved for future reference.
 
 Example session 1:
 
 Question: Compare the BG circuit specifications and architecture from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs and the [2] reference in the paper.
 Thought: I should first search for the BG circuit specifications and architecture from the paper titled "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs" and then search for the [2] reference in the paper.
-Action: search_db: "BG circuit specifications and architecture from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
+Action: search_db: BG circuit specifications and architecture from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
 PAUSE
 
 You will be called again with this:
@@ -159,8 +172,7 @@ Observation: [
         "from_bm25": false
     }
 ]
-
-Action: search_db: "What is the [2] reference title in the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
+Action: search_db: What is the [2] reference title in the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
 PAUSE
 You will be called again with this:
 
@@ -293,8 +305,7 @@ Observation:[
     }
 ]
 
-Thought: Since observation didn't give me the reference title of [2] reference, I should use the full text of the document to find the reference title.
-Action: full_document_search: {"title": "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs", "query": "What is the [2] reference title in the document"}
+Action: full_document_search: 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs, What is the [2] reference title in the document
 PAUSE
 You will be called again with this:
 
@@ -303,8 +314,7 @@ The [2] reference in the document is:
 
 T. Hirose, K. Ueno, N. Kuroki, and M. Numa, "A CMOS bandgap and sub-bandgap voltage reference circuits for nanowatt power LSIs," in Proc. IEEE Asian Solid-State Circuits Conf., 2010, pp. 77–80.
 
-Thought: Since I have the title of the reference, I will search for the BG specifications in the document and the architecture of the BG circuit
-Action: search_db: "BG circuit specifications and architecture from the paper titled A CMOS bandgap and sub-bandgap voltage reference circuits for nanowatt power LSIs"
+Action: search_db("BG circuit specifications and architecture from the paper titled A CMOS bandgap and sub-bandgap voltage reference circuits for nanowatt power LSIs")
 PAUSE
 You will be called again with this:
 
@@ -445,38 +455,7 @@ Observation:[
     }
 ]
 
-You then output:
+Based on the observation, you then generate the final output:
 
-Answer: 
-To compare the BG circuit specifications and architecture from the paper titled "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs" and the [2] reference in the paper, we need to look at the details provided in both documents.
-
-### From the paper "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs":
-- **Specifications**:
-  - The bandgap reference (BGR) circuit generates a reference voltage of 1.09 V with a power dissipation of 100 nW.
-  - The sub-BGR circuit generates a reference voltage of 0.548 V with a power dissipation of 52.5 nW.
-  - The circuits are designed for nanowatt power LSIs and avoid the use of resistors, using only MOSFETs and one bipolar transistor.
-  - The architecture includes a nano-ampere current reference circuit, a bipolar transistor, and proportional-to-absolute-temperature (PTAT) voltage generators.
-
-- **Architecture**:
-  - The BGR and sub-BGR circuits are implemented without resistors, which allows them to operate at sub-1-V supply voltages.
-  - The circuits use a PTAT voltage generator to compensate for the negative temperature dependence of the base-emitter voltage in a PNP bipolar transistor.
-
-### From the [2] reference titled "A CMOS bandgap and sub-bandgap voltage reference circuits for nanowatt power LSIs":
-- **Specifications**:
-  - The BGR circuit generates a bandgap voltage of 1.18 V with a standard deviation of 19.1 mV.
-  - The sub-BGR circuit generates a sub-bandgap voltage of 553 mV with a standard deviation of 9.0 mV.
-  - The line regulations for the BGR and sub-BGR circuits are 0.45%/V and 0.11%/V, respectively.
-
-- **Architecture**:
-  - The BGR circuit consists of a nano-ampere current reference, a bipolar transistor, and a PTAT voltage generator.
-  - The PTAT voltage generator uses source-coupled differential pairs to generate a positive temperature-dependent voltage.
-  - The architecture is designed to operate without resistors, similar to the main paper, focusing on nanowatt power operation.
-
-### Comparison:
-- Both papers focus on designing BGR and sub-BGR circuits for nanowatt power LSIs without using resistors, which is a key feature for low-power operation.
-- The main paper provides specific power dissipation values (100 nW and 52.5 nW) and reference voltages (1.09 V and 0.548 V), while the [2] reference provides slightly different reference voltages (1.18 V and 553 mV) and includes standard deviation values, indicating a focus on variability and precision.
-- The architecture in both papers includes a PTAT voltage generator and a bipolar transistor, but the [2] reference provides more detail on the use of source-coupled differential pairs in the PTAT voltage generator.
-
-Overall, both documents present similar approaches to designing low-power BGR and sub-BGR circuits, with slight variations in specifications and additional details in the [2] reference regarding the implementation of the PTAT voltage generator.
 
 """

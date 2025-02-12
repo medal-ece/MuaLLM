@@ -610,7 +610,7 @@ def retrieve_rerank(query: str, db, es_bm25, k: int) -> List[Dict[str, Any]]:
         })
     return final_results
 
-def main(query: str = None, load_data: bool = False):
+def main(query: str, load_data: bool = False) -> dict:
     """
     Main function to search or load data into the vector database
     Args:
@@ -689,13 +689,24 @@ def main(query: str = None, load_data: bool = False):
         es_bm25 = create_elasticsearch_bm25_index(vector_db)
         results = retrieve_rerank(query, vector_db, es_bm25, 10)
         
-        # Write results to a json file
+        # Prepare response with both text and images
+        response = {
+            'text': results,  # Original text results
+            'images': {}      # Dictionary to store image mappings
+        }
+        
+        # Extract image information from results
+        for idx, result in enumerate(results, 1):
+            if 'image_path' in result:
+                response['images'][idx] = result['image_path']
+        
+        # Save response to file
         with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/search_results.json", "w") as f:
-            json.dump(results, f, indent=4)
-        # save images to a folder
+            json.dump(response, f, indent=4)
         
-        
-        return results
+        return response
+
+    return None
 
 # Keep this for direct script execution, but use the new main function
 if __name__ == "__main__":
