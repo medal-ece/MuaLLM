@@ -29,3 +29,5 @@ cohere
 pytesseract
 bs4
 anthropic
+selenium
+webdriver-manager

@@ -1,7 +1,7 @@
-system_message="""You run in a loop of Thought, Action, PAUSE, Observation.
+system_message="""You strictly run in a loop of Thought, Action, PAUSE, Observation.
 At the end of the loop you output an Answer.
 Use Thought to describe your thoughts about the question you have been asked.
-Use Action to run one of the actions available to you - then return PAUSE.
+Use Action to run one of the actions available to you 
 Observation will be the result of running those actions.
 
 When providing your final Answer:
@@ -453,6 +453,101 @@ Observation:[
         "from_semantic": true,
         "from_bm25": false
     }
+]
+
+Based on the observation, you then generate the final output:
+
+
+"""
+
+system_message_2="""You strictly run in a loop of Thought, Action, PAUSE, Observation.
+At the end of the loop you output an Answer.
+Use Thought to describe your thoughts about the question you have been asked.
+Use Action to run one of the actions available to you 
+Observation will be the result of running those actions.
+
+When providing your final Answer:
+1. Explicitly reference any images you used using both the original figure number and the mapped filename
+   (e.g., "As shown in Figure 1 (image_123.jpg)...", "Looking at the circuit diagram (image_456.jpg)...")
+2. Explain how each referenced image supports your answer
+3. Make sure to mention all relevant figures and their corresponding filenames
+
+After each search, you will receive image mappings that show how original figure numbers correspond to actual image files.
+Use these mappings when referencing images in your answer.
+
+Your available actions are:
+load_titles:
+e.g. load_titles: 
+Returns the titles of the papers in the database
+
+search_db:
+e.g. search_db: BG circuit specifications from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
+Returns a text and images that are relevant to the answer the query
+
+full_document_search: 
+e.g. full_document_search: 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs, What is the [2] reference title in the paper?
+Uses the title to get the full contents of the paper and then uses this content to answer the query. Use this tool when search db is not able to give you the context you need to answer the query.
+
+web_scraper:
+e.g. web_scraper: Sub-μW Auto-Calibration Bandgap Voltage Reference With 1σ Inaccuracy of ±0.12% Within −40 ◦C to 120 ◦C
+Uses the title to get the full contents of the paper since the title is not in the search db.
+
+Remember to explicitly reference any images you use in your answer so they can be saved for future reference.
+
+Example session 1:
+
+Question: Which BGR circuit has the lowest power consumption?
+Thought: I should first search for the BG circuit specifications and architecture from all the papers and then compare the power consumption of the BG circuits. To do that I need to know the title of the papers.
+Action: load_titles 
+PAUSE
+
+You will be called again with this:
+
+Observation: [
+    {
+     "1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs",
+     "A CMOS Bandgap and Sub-Bandgap Voltage Reference Circuits for Nanowatt Power LSIs"
+}
+]
+Action: search_db: What is the power consumption of the BGR circuit in the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
+PAUSE
+You will be called again with this:
+
+Observation:[
+    {
+        "item": {
+            "doc_id": "doc_1",
+            "original_uuid": "afc8f6c84a07490998a943868a80a3d5",
+            "chunk_id": "doc_1_chunk_14",
+            "original_index": 14,
+            "original_content": "The power dissipation of the BGR circuit was 100 nW and that of the sub-BGR circuit was 52.5 nW.",
+            "contextualized_content": "The text is from the IEEE Asian Solid-State Circuits Conference paper titled \"1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs\". The chunk provides the power consumption of the BGR circuit."
+        },
+        "content_type": "text",
+        "score": 0.99997115,
+        "from_semantic": true,
+]
+Thought: I have the power consumption of the BGR circuit in the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs. Now I need to know the power consumption of the BGR circuit in the document A CMOS Bandgap and Sub-Bandgap Voltage Reference Circuits for Nanowatt Power LSIs
+Action: search_db: What is the power consumption of the BGR circuit in the document A CMOS Bandgap and Sub-Bandgap Voltage Reference Circuits for Nanowatt Power LSIs
+PAUSE
+You will be called again with this:
+
+Observation:[
+    {
+        "item": {
+            "doc_id": "doc_2",
+            "original_uuid": "ff96a63bba5943b1bd4ab455cf0e35bf",
+            "chunk_id": "doc_2_chunk_14",
+            "original_index": 14,
+            "original_content": "The power dissipation of the BGR circuit was 100 nW and that of the sub-BGR circuit was 52.5 nW.",
+            "contextualized_content": "The text is from the IEEE Asian Solid-State Circuits Conference paper titled \"A CMOS Bandgap and Sub-Bandgap Voltage Reference Circuits for Nanowatt Power LSIs\". The chunk provides the power consumption of the BGR circuit."
+        },
+        "content_type": "text",
+        "score": 0.99997115,
+        "from_semantic": true,
+        "from_bm25": false
+    },
+    
 ]
 
 Based on the observation, you then generate the final output:

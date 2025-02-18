@@ -4,7 +4,7 @@ from openai import OpenAI
 import re
 import httpx
 import json
-from messages import system_message
+from messages import system_message, system_message_2
 from search import main as search_db
 from pdf2json_chunked import main as pdf2json_chunked
 from fullcontext import main as full_document_search
@@ -12,7 +12,7 @@ from web_scraper import main as web_scraper
 import argparse
 import shutil
 from datetime import datetime
-
+from load_titles import load_titles
 # Load environment variables from .env file
 load_dotenv()
 
@@ -46,11 +46,12 @@ known_actions = {
     "search_db": search_db,
     "pdf2json_chunked": pdf2json_chunked,
     "full_document_search": full_document_search,
-    "web_scraper": web_scraper      
+    "web_scraper": web_scraper,
+    "load_titles": load_titles
 }
 
 action_re = re.compile('^Action: (\w+): (.*)$')   # python regular expression to selection action
-system_message = system_message.strip()
+system_message = system_message_2.strip()
 
 def create_image_mapping(observation):
     """Create a mapping between figure references and actual image paths"""
@@ -83,9 +84,13 @@ def create_image_mapping(observation):
 def extract_and_save_answer_images(answer_text, image_mappings, observation):
     """Extract and save images mentioned in the answer using image mappings"""
     try:
-        # Create images directory if it doesn't exist
+        # Delete existing output directory if it exists
         output_dir = "output_images"
-        os.makedirs(output_dir, exist_ok=True)
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+            
+        # Create fresh output directory
+        os.makedirs(output_dir)
         
         # print("\nDebug: Starting image extraction")
         # print(f"Image mappings: {image_mappings}")
@@ -176,8 +181,11 @@ def query(question, max_turns=10):
                         raise Exception("Expected a tuple, got: {}".format(type(parsed_input).__name__))
                 except Exception as e:
                     raise Exception("Invalid action input format: {}. Error: {}".format(action_input, str(e)))
+            elif action == "load_titles":
+                observation = load_titles()
             else:
                 observation = known_actions[action](action_input)
+            
             
             # Store the observation for later image extraction
             last_observation = observation
