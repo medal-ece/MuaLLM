@@ -477,7 +477,7 @@ Use these mappings when referencing images in your answer.
 
 Your available actions are:
 load_titles:
-e.g. load_titles: 
+e.g. load_titles: True
 Returns the titles of the papers in the database
 
 search_db:
@@ -498,7 +498,7 @@ Example session 1:
 
 Question: Which BGR circuit has the lowest power consumption?
 Thought: I should first search for the BG circuit specifications and architecture from all the papers and then compare the power consumption of the BG circuits. To do that I need to know the title of the papers.
-Action: load_titles 
+Action: load_titles: True
 PAUSE
 
 You will be called again with this:
@@ -549,6 +549,36 @@ Observation:[
     },
     
 ]
+
+Based on the observation, you then generate the final output:
+
+
+"""
+
+system_message_3="""You are a helpful assistant that can answer questions about the papers in the database.
+
+When providing your final Answer:
+1. Explicitly reference any images you used using both the original figure number and the mapped filename
+   (e.g., "As shown in Figure 1 (image_123.jpg)...", "Looking at the circuit diagram (image_456.jpg)...")
+2. Explain how each referenced image supports your answer
+3. Make sure to mention all relevant figures and their corresponding filenames
+
+After each search, you will receive image mappings that show how original figure numbers correspond to actual image files.
+Use these mappings when referencing images in your answer.
+
+Your available actions are:
+
+search_db:
+e.g. search_db: BG circuit specifications from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
+Returns a text and images that are relevant to the answer the query
+
+Remember to explicitly reference any images you use in your answer so they can be saved for future reference.
+
+Example session 1:
+
+Question: Which BGR circuit has the lowest power consumption?
+
+Action: search_db: BG circuit specifications from the paper titled 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs
 
 Based on the observation, you then generate the final output:
 

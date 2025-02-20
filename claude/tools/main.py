@@ -181,8 +181,9 @@ def query(question, max_turns=10):
                         raise Exception("Expected a tuple, got: {}".format(type(parsed_input).__name__))
                 except Exception as e:
                     raise Exception("Invalid action input format: {}. Error: {}".format(action_input, str(e)))
-            elif action == "load_titles":
-                observation = load_titles()
+            elif action == "load_titles" and action_input == "True":
+                observation = known_actions[action]()
+                print(observation)
             else:
                 observation = known_actions[action](action_input)
             

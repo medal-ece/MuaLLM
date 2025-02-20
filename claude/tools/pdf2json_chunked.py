@@ -179,4 +179,5 @@ async def main(pdf_files, output_path="../agent_db/documents.json", image_dir=".
     print(f"Extracted images have been saved to {image_dir}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    pdf_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/papers/paper4.pdf"
+    asyncio.run(main([pdf_path]))
