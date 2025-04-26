@@ -40,16 +40,22 @@ def fullcontext(question: str, context: str) -> str:
     
     return message.content[0].text
 
-def main(title, query):
+def main(input_str):
     """
     Get response from Claude using full context from a specific paper
     
     Args:
-        title (str): Title or part of title to search for
-        query (str): Question to ask about the paper
+        input_str (str): Combined string containing title and query separated by comma
     """
+    # Split input into title and query
+    try:
+        title, query = input_str.split(", ", 1)
+    except ValueError:
+        raise ValueError("Input must be in format: 'title, query'")
+
     # read the pdf content from the json file
-    with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/pdf_content.json", "r") as file:
+    pdf_content_path = os.path.join(os.path.dirname(__file__), "..", "agent_db", "pdf_content.json")
+    with open(pdf_content_path, "r") as file:
         pdf_content = json.load(file)
     
     # Normalize the search title and all keys for comparison
@@ -96,8 +102,10 @@ def main(title, query):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Search the vector database")    
-    parser.add_argument("--title", type=str, help="Title of the paper", default="give me the schematic diagram of a PTAT voltage generator")
-    parser.add_argument("--query", type=str, help="Search query", default="give me the schematic diagram of a PTAT voltage generator")
+    parser.add_argument("--input", type=str, help="Input in format: 'title, query'")
     args = parser.parse_args()
     
-    main(title=args.title, query=args.query)
+    if args.input:
+        main(args.input)
+    else:
+        print("Please provide input in format: 'title, query'")

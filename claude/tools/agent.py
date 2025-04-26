@@ -142,18 +142,25 @@ def query(question, max_turns=10):
     next_prompt = question
     image_mappings = {}  # Store mappings between figure references and actual files
     last_observation = None  # Store the last observation for image extraction
+    final_answer = None  # Store the final answer
     
     while i < max_turns:
         i += 1
         result = bot(next_prompt)
-        print(result)
+        final_answer = result  # Store the result
         
         # Check if this is the final answer (no more actions)
         if "Action:" not in result:
             # Extract and save images mentioned in the answer
+            image_dir = None
             if last_observation:
-                extract_and_save_answer_images(result, image_mappings, last_observation)
-            return
+                image_dir = extract_and_save_answer_images(result, image_mappings, last_observation)
+            
+            # Return both the answer and image information
+            return {
+                "answer": final_answer,
+                "image_paths": image_dir
+            }
             
         actions = [
             action_re.match(a) 
@@ -165,7 +172,6 @@ def query(question, max_turns=10):
             action, action_input = actions[0].groups()
             if action not in known_actions:
                 raise Exception("Unknown action: {}: {}".format(action, action_input))
-            print(" -- running {} {}".format(action, action_input))
             
             # Execute action and get observation
             if action_input.startswith('(') and action_input.endswith(')'):
@@ -179,10 +185,8 @@ def query(question, max_turns=10):
                     raise Exception("Invalid action input format: {}. Error: {}".format(action_input, str(e)))
             elif action == "load_titles" and action_input == "True":
                 observation = known_actions[action]()
-                print(observation)
             else:
                 observation = known_actions[action](action_input)
-            
             
             # Store the observation for later image extraction
             last_observation = observation
@@ -200,12 +204,22 @@ def query(question, max_turns=10):
             else:
                 next_prompt = f"Observation: {observation}"
         else:
-            
-            return
+            # Return both the answer and image information if no more actions
+            return {
+                "answer": final_answer,
+                "image_paths": None
+            }
+    
+    # Return both the answer and image information after max turns
+    return {
+        "answer": final_answer,
+        "image_paths": None
+    }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--query", type=str, help="Query to gpt")
     args = parser.parse_args()
     question = args.query
-    query(question=question)
+    answer = query(question=question)
+    print(answer["answer"])

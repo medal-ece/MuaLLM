@@ -5,7 +5,7 @@ import re
 import httpx
 import json
 from messages import system_message, system_message_2
-from search import main as search_db
+from search1 import main as search_db
 from pdf2json_chunked import main as pdf2json_chunked
 from fullcontext import main as full_document_search
 from web_scraper import main as web_scraper
@@ -44,11 +44,11 @@ class Agent:
     
 known_actions = {
     "search_db": search_db,
-    "full_document_search": lambda x: full_document_search(*x.split(", ", 1)),
     "load_titles": load_titles
 }
 
 action_re = re.compile(r'^Action: (\w+): (.*)$')   # Add 'r' prefix
+
 system_message = system_message_2.strip()
 
 def create_image_mapping(observation):
@@ -144,18 +144,25 @@ def query(question, max_turns=10):
     next_prompt = question
     image_mappings = {}  # Store mappings between figure references and actual files
     last_observation = None  # Store the last observation for image extraction
+    final_answer = None  # Add this to store final answer
     
     while i < max_turns:
         i += 1
         result = bot(next_prompt)
-        print(result)
+        final_answer = result  # Store the result
+        print(result)  # Keep the print for debugging
         
         # Check if this is the final answer (no more actions)
         if "Action:" not in result:
             # Extract and save images mentioned in the answer
+            image_dir = None
             if last_observation:
-                extract_and_save_answer_images(result, image_mappings, last_observation)
-            return
+                image_dir = extract_and_save_answer_images(result, image_mappings, last_observation)
+            # Return both answer and image paths instead of just returning
+            return {
+                "answer": final_answer,
+                "image_paths": image_dir
+            }
             
         actions = [
             action_re.match(a) 
@@ -202,12 +209,22 @@ def query(question, max_turns=10):
             else:
                 next_prompt = f"Observation: {observation}"
         else:
-            
-            return
+            # Return structured response instead of just the result
+            return {
+                "answer": final_answer,
+                "image_paths": None
+            }
+    
+    # Return structured response after max turns
+    return {
+        "answer": final_answer,
+        "image_paths": None
+    }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--query", type=str, help="Query to gpt")
     args = parser.parse_args()
     question = args.query
-    query(question=question)
+    response = query(question=question)  # Store the response
+    print(response["answer"])  # Print just the answer part

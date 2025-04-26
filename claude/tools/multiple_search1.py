@@ -1,6 +1,6 @@
 import json
 import os
-from agent import query
+from main1 import query
 import argparse
 from datetime import datetime
 import shutil
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--queries", 
         type=str, 
-        default="queries3.json",
+        default="queries1.json",
         help="Path to JSON file containing queries"
     )
     parser.add_argument(

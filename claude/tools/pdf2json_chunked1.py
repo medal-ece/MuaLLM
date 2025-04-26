@@ -96,7 +96,7 @@ class PDFProcessor:
                 new_path = os.path.join(self.image_dir, new_name)
                 
                 # Ensure relative path in JSON
-                json_path = os.path.join("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/images/", new_name)
+                json_path = os.path.join("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/images/", new_name)
                 
                 shutil.move(image_file, new_path)
                 images.append({
@@ -121,7 +121,7 @@ class PDFProcessor:
         return document, len(images)
 # In pdf2json_chunked.py
 
-async def main(pdf_files, output_path="../agent_db/documents.json", image_dir="../agent_db/images"):
+async def main(pdf_files, output_path="../agent2_db/documents.json", image_dir="../agent2_db/images"):
     """
     Process PDF files into JSON format
     

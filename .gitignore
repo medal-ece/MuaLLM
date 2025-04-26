@@ -38,3 +38,10 @@ context_output.txt
 query_results/
 ieee_cookies.json
 output_images/
+google.json
+agent1_db/
+agent2_db/
+query_results1/
+query_results3/
+queries.json
+queries1.json
