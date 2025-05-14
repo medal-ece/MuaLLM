@@ -55,16 +55,22 @@ def create_image_mapping(observation):
     """Create a mapping between figure references and actual image paths"""
     image_map = {}
     try:
+        print("\nDebug: Starting image mapping creation")
         if isinstance(observation, str):
             results = json.loads(observation)
         else:
             results = observation
             
+        print(f"Debug: Processing {len(results.get('text', []))} results")
         # Extract images and create mapping
         for result in results.get('text', []):
+            print(f"\nDebug: Processing result: {result}")
             if result.get('content_type') == 'image':
+                print("Debug: Found image content type")
                 path = result['item'].get('path')
+                print(f"Debug: Image path: {path}")
                 if path and os.path.exists(path):
+                    print("Debug: Path exists")
                     # Get the image filename without extension
                     filename = os.path.basename(path)
                     base_name = os.path.splitext(filename)[0]  # e.g., 'image_21'
@@ -73,15 +79,24 @@ def create_image_mapping(observation):
                     if match := re.search(r'image_(\d+)', base_name):
                         img_num = match.group(1)
                         image_map[f"Figure {img_num}"] = filename
+                        print(f"Debug: Added mapping Figure {img_num} -> {filename}")
+                    else:
+                        print(f"Debug: Could not extract number from filename: {base_name}")
+                else:
+                    print(f"Debug: Path does not exist: {path}")
 
     except Exception as e:
         print(f"Error creating image mapping: {e}")
-    # print(f"Image mappings: {image_map}")
+    print(f"Debug: Final image mappings: {image_map}")
     return image_map
 
 def extract_and_save_answer_images(answer_text, image_mappings, observation):
     """Extract and save images mentioned in the answer using image mappings"""
     try:
+        print("\nDebug: Starting image extraction")
+        print(f"Debug: Image mappings: {image_mappings}")
+        print(f"Debug: Answer text: {answer_text[:200]}...")  # Print first 200 chars of answer
+        
         # Delete existing output directory if it exists
         output_dir = "output_images"
         if os.path.exists(output_dir):
@@ -89,9 +104,6 @@ def extract_and_save_answer_images(answer_text, image_mappings, observation):
             
         # Create fresh output directory
         os.makedirs(output_dir)
-        
-        # print("\nDebug: Starting image extraction")
-        # print(f"Image mappings: {image_mappings}")
         
         # Find all figure references in the answer
         figure_pattern = r'Figure (\d+)'
@@ -103,11 +115,12 @@ def extract_and_save_answer_images(answer_text, image_mappings, observation):
             fig_num = ref.group(1)
             fig_ref = f"Figure {fig_num}"
             
-            # print(f"Debug: Found reference to {fig_ref}")
+            print(f"\nDebug: Found reference to {fig_ref}")
             
             # Check if this figure exists in our mappings
             if fig_ref in image_mappings:
                 filename = image_mappings[fig_ref]
+                print(f"Debug: Found mapping for {fig_ref} -> {filename}")
                 
                 # Find the image in the results
                 for result in observation.get('text', []):
@@ -118,20 +131,25 @@ def extract_and_save_answer_images(answer_text, image_mappings, observation):
                         source_path = result['item']['path']
                         dest_path = os.path.join(output_dir, filename)
                         
+                        print(f"Debug: Copying image from {source_path} to {dest_path}")
                         # Copy image to output directory
                         shutil.copy2(source_path, dest_path)
                         saved_images.append((fig_ref, dest_path))
-                        # print(f"Debug: Saved {fig_ref} ({filename}) to {dest_path}")
+                        print(f"Debug: Successfully saved {fig_ref} ({filename}) to {dest_path}")
                         break
+                    else:
+                        print(f"Debug: No matching image found for {filename}")
+            else:
+                print(f"Debug: No mapping found for {fig_ref}")
         
         # Print summary
         if saved_images:
-            print(f"\nSaved images from answer:")
-            # for ref, path in saved_images:
-            #     print(f"- {ref} -> {path}")
+            print(f"\nDebug: Successfully saved {len(saved_images)} images:")
+            for ref, path in saved_images:
+                print(f"- {ref} -> {path}")
             return output_dir
         else:
-            print("No images found in answer")
+            print("Debug: No images were saved")
             return None
             
     except Exception as e:

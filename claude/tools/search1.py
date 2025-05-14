@@ -68,8 +68,8 @@ class ContextualVectorDB:
         Answer only with the succinct context , mention the title of the document and nothing else.
         """
         try:
-            response = self.anthropic_client.beta.prompt_caching.messages.create(
-                model="claude-3-haiku-20240307",
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-haiku-20241022",
                 max_tokens=1000,
                 temperature=0.0,
                 messages=[
@@ -88,7 +88,6 @@ class ContextualVectorDB:
                         ]
                     },
                 ],
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
                
             return response.content[0].text, response.usage
@@ -123,8 +122,8 @@ class ContextualVectorDB:
         """
 
         try:
-            response = self.anthropic_client.beta.prompt_caching.messages.create(
-                model="claude-3-haiku-20240307",
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-haiku-20241022",
                 max_tokens=1000,
                 temperature=0.0,
                 messages=[
@@ -147,7 +146,6 @@ class ContextualVectorDB:
                         ]
                     },
                 ],
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
             
             context = response.content[0].text
@@ -197,21 +195,29 @@ class ContextualVectorDB:
                         }
                     else:  # It's an image
                         doc, image = item
-                        time.sleep(3)  # Longer delay between requests
-                        base64_image = self.encode_image(image["path"])
-                        contextualized_text, usage = self.situate_image_context(doc["content"],image["path"], base64_image)
-                        with self.token_lock:
-                            self.token_counts['input'] += usage.input_tokens
-                            self.token_counts['cache_read'] += usage.cache_read_input_tokens
-                            self.token_counts['cache_creation'] += usage.cache_creation_input_tokens
+                        # Load image captions from JSON file
+                        image_captions_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/image_captions_paper1.json"
+                        with open(image_captions_path, 'r') as f:
+                            image_captions = json.load(f)
+                        
+                        # Find matching caption for this image
+                        image_caption = None
+                        for img in image_captions['images']:
+                            if img['image_path'] == image['path']:
+                                image_caption = img['caption'] + "This is from the document " + doc['title']
+                                break
+                        
+                        if image_caption is None:
+                            print(f"Warning: No caption found for image {image['path']}")
+                            continue
                         
                         result = {
-                            'text_to_embed': contextualized_text,
+                            'text_to_embed': image_caption,
                             'metadata': {
                                 'doc_id': doc['doc_id'],
                                 'image_id': image['image_id'],
                                 'path': image['path'],
-                                "contextualized_content": contextualized_text
+                                'contextualized_content': image_caption
                             }
                         }
                     
@@ -696,8 +702,8 @@ def main(query: str, load_data: bool = False) -> dict:
         
         # Extract image information from results
         for idx, result in enumerate(results, 1):
-            if 'image_path' in result:
-                response['images'][idx] = result['image_path']
+            if result.get('content_type') == 'image' and 'item' in result and 'path' in result['item']:
+                response['images'][idx] = result['item']['path']
         
         # Save response to file
         with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/search_results.json", "w") as f:
@@ -713,7 +719,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_data", action="store_true", help="Load data from json file and save to new vector database")
     parser.add_argument("--query", type=str, help="Search query", default="give me the schematic diagram of a PTAT voltage generator")
     args = parser.parse_args()
-    
     main(query=args.query, load_data=args.load_data)
+
         
 
