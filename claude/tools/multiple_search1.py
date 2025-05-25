@@ -67,7 +67,7 @@ def process_queries(queries_file: str, output_dir: str):
             all_results.append(result)
 
     # Save all results in a single file
-    results_file = os.path.join(run_dir, "query_results3.json")
+    results_file = os.path.join(run_dir, "query_results4.json")
     with open(results_file, 'w') as f:
         json.dump({
             "timestamp": timestamp,
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output", 
         type=str, 
-        default="query_results3",
+        default="query_results4",
         help="Output directory for results"
     )
     

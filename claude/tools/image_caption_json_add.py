@@ -1,11 +1,11 @@
 import json
 
 # Load the context file
-with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/context.json', 'r') as f:
+with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent3_db/context.json', 'r') as f:
     context_data = json.load(f)
 
 # Load the captions file
-with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/image_captions_paper1.json', 'r') as f:
+with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent3_db/image_captions_paper1.json', 'r') as f:
     captions_data = json.load(f)
 
 # Create a dictionary of image paths to captions
@@ -28,5 +28,5 @@ for entry in context_data:
                 break
 
 # Save the updated context file
-with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent2_db/context.json', 'w') as f:
+with open('/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent3_db/context.json', 'w') as f:
     json.dump(context_data, f, indent=4)
