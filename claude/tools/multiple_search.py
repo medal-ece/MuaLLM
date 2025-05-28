@@ -1,6 +1,6 @@
 import json
 import os
-from agent import query
+from main import query
 import argparse
 from datetime import datetime
 import shutil
@@ -67,7 +67,7 @@ def process_queries(queries_file: str, output_dir: str):
             all_results.append(result)
 
     # Save all results in a single file
-    results_file = os.path.join(run_dir, "query_results3.json")
+    results_file = os.path.join(run_dir, "final_query_results.json")
     with open(results_file, 'w') as f:
         json.dump({
             "timestamp": timestamp,
@@ -82,13 +82,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--queries", 
         type=str, 
-        default="queries3.json",
+        default="queries.json",
         help="Path to JSON file containing queries"
     )
     parser.add_argument(
         "--output", 
         type=str, 
-        default="query_results3",
+        default="final_query_results",
         help="Output directory for results"
     )
     

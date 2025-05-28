@@ -13,8 +13,14 @@ import argparse
 import shutil
 from datetime import datetime
 from load_titles import load_titles
+import time
+
 # Load environment variables from .env file
 load_dotenv()
+
+# Cost per million tokens
+OPENAI_INPUT_COST = 5.00  # $5.00 per 1M input tokens
+OPENAI_OUTPUT_COST = 20.00  # $20.00 per 1M output tokens
 
 # Access the API key from environment variables
 api_key = os.getenv('OPENAI_API_KEY')
@@ -22,25 +28,51 @@ api_key = os.getenv('OPENAI_API_KEY')
 # Initialize the OpenAI client with the API key
 client = OpenAI(api_key=api_key)
 
+def calculate_cost(input_tokens, output_tokens):
+    input_cost = (input_tokens / 1_000_000) * OPENAI_INPUT_COST
+    output_cost = (output_tokens / 1_000_000) * OPENAI_OUTPUT_COST
+    total_cost = input_cost + output_cost
+    return {
+        'input_cost': input_cost,
+        'output_cost': output_cost,
+        'total_cost': total_cost,
+        'input_tokens': input_tokens,
+        'output_tokens': output_tokens
+    }
+
 class Agent:
     def __init__(self, system=""):
         self.system = system
         self.messages = []
+        self.total_cost = 0
+        self.total_latency = 0
         if self.system:
             self.messages.append({"role": "system", "content": system})
 
     def __call__(self, message):
         self.messages.append({"role": "user", "content": message})
-        result = self.execute()
+        result, cost_info = self.execute()
         self.messages.append({"role": "assistant", "content": result})
+        self.total_cost += cost_info['total_cost']
+        self.total_latency += cost_info['latency']
         return result
 
     def execute(self):
+        start_time = time.time()
         completion = client.chat.completions.create(
             model="gpt-4o", 
             temperature=0,
             messages=self.messages)
-        return completion.choices[0].message.content
+        end_time = time.time()
+        latency = end_time - start_time
+        
+        cost_info = calculate_cost(
+            completion.usage.prompt_tokens,
+            completion.usage.completion_tokens
+        )
+        cost_info['latency'] = latency
+        
+        return completion.choices[0].message.content, cost_info
     
 known_actions = {
     "search_db": search_db,
@@ -155,6 +187,9 @@ def query(question, max_turns=10):
             # Extract and save images mentioned in the answer
             if last_observation:
                 extract_and_save_answer_images(result, image_mappings, last_observation)
+            print("\nCost and Latency Summary:")
+            print(f"Total Cost: ${bot.total_cost:.4f}")
+            print(f"Total Latency: {bot.total_latency:.2f} seconds")
             return
             
         actions = [

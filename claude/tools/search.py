@@ -36,7 +36,7 @@ class ContextualVectorDB:
         self.embeddings=[]
         self.metadata=[]
         self.query_cache={}
-        self.db_path= f"/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/base_db/vector_db.pkl"
+        self.db_path= f"/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/base_db/vector_db.pkl"
         self.token_counts={
             'input': 0,
             'output': 0,
@@ -68,8 +68,8 @@ class ContextualVectorDB:
         Answer only with the succinct context , mention the title of the document and nothing else.
         """
         try:
-            response = self.anthropic_client.beta.prompt_caching.messages.create(
-                model="claude-3-haiku-20240307",
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-haiku-20241022",
                 max_tokens=1000,
                 temperature=0.0,
                 messages=[
@@ -88,7 +88,6 @@ class ContextualVectorDB:
                         ]
                     },
                 ],
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
                
             return response.content[0].text, response.usage
@@ -101,44 +100,77 @@ class ContextualVectorDB:
         wait=wait_exponential(multiplier=1, min=4, max=10),
         reraise=True
     )
-    def situate_image_context(self, doc: str,path: str, base64_image: str) -> tuple[str, Any]:
-        DOCUMENT_CONTEXT_PROMPT = """
-        <document>
-        {doc_content}
-        </document>
-        """
+    def situate_image_context(self, image_path: str) -> tuple[str, Any]:
+        """Process a single image and return its context from the document"""
+        # Get PDF path from documents.json
+        documents_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'finalAgent_db', 'documents.json')
+        with open(documents_path, 'r') as f:
+            documents = json.load(f)
+            pdf_path = documents[0].get('pdf_path')  # Get pdf_path parameter
+            if not pdf_path:
+                raise ValueError("pdf_path not found in documents.json")
 
         IMAGE_CONTEXT_PROMPT = """
-        Please provide a detailed description of this image that would help in search retrieval. Your description should:
-        1. Start with this image is from the document title  Example: "This image is from the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs"
-        2. Mention the type of image (e.g., "Schematic diagram", "Circuit diagram", "Graph", "Plot", "Illustration")
-        3. Describe the key visual elements and their relationships
-        4. Mention any text, labels, or annotations visible in the image
-        5. Note any technical components or symbols if present
-        6. Explain what concept or system this image is depicting
-        
-        
-        Format your response as a clear, detailed paragraph that would help someone find this image when searching.
-        Focus on being specific and technical rather than general.
+         Start by stating:  
+"This image is from the document titled: [Insert exact title here]"  
+Example: “This image is from the document 1.2-V Supply, 100-nW, 1.09-V Bandgap and 0.7-V Supply, 52.5-nW, 0.55-V Subbandgap Reference Circuits for Nanowatt CMOS LSIs.”
+
+Then analyze the image using the following format:
+
+1. Image Type and Summary:  
+   - "It is a [type of image] that [briefly describes what it shows]."
+
+2. Detailed Technical Description:  
+   - Describe key components, measurements, relationships, and technical significance.  
+   - Tailor the description based on the image type:
+     - Circuit diagram: Explain key components, their connections, and how they function together.
+     - Graph: Explain axes, trends, and performance insights.
+     - Block diagram: Describe the high-level system architecture and interactions between blocks.
+
+3. Contextual Significance:  
+   - Explain how this image supports or illustrates the paper's main contributions or technical innovations.
+
+Make sure to:
+
+- Extract and include the exact caption from the PDF.  
+- Identify the specific type of image (e.g., circuit diagram, schematic, graph, block diagram, table).  
+- Provide a comprehensive technical analysis of the image.  
+- Explain the relevance and significance of the image within the context of the paper.
         """
 
         try:
-            response = self.anthropic_client.beta.prompt_caching.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=1000,
+            # Read the PDF file
+            with open(pdf_path, 'rb') as pdf_file:
+                pdf_content = base64.b64encode(pdf_file.read()).decode('utf-8')
+
+            # Read the image file
+            with open(image_path, 'rb') as img_file:
+                img_content = base64.b64encode(img_file.read()).decode('utf-8')
+
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=1024,
                 temperature=0.0,
                 messages=[
                     {
                         "role": "user", 
                         "content": [
                             {
-                                "type": "text",
-                                "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=doc),
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": pdf_content
+                                },
                                 "cache_control": {"type": "ephemeral"}
                             },
                             {
                                 "type": "image", 
-                                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64_image}
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": img_content
+                                }
                             },
                             {
                                 "type": "text", 
@@ -147,10 +179,14 @@ class ContextualVectorDB:
                         ]
                     },
                 ],
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
             
             context = response.content[0].text
+            
+            # Print usage information
+            print("API Usage Info:")
+            print(response.usage.model_dump_json(indent=2))
+            print()
             
             return context, response.usage
             
@@ -199,7 +235,7 @@ class ContextualVectorDB:
                         doc, image = item
                         time.sleep(3)  # Longer delay between requests
                         base64_image = self.encode_image(image["path"])
-                        contextualized_text, usage = self.situate_image_context(doc["content"],image["path"], base64_image)
+                        contextualized_text, usage = self.situate_image_context(image["path"])
                         with self.token_lock:
                             self.token_counts['input'] += usage.input_tokens
                             self.token_counts['cache_read'] += usage.cache_read_input_tokens
@@ -214,6 +250,7 @@ class ContextualVectorDB:
                                 "contextualized_content": contextualized_text
                             }
                         }
+                    
                     
                     local_texts.append(result['text_to_embed'])
                     local_metadata.append(result['metadata'])
@@ -622,7 +659,7 @@ def main(query: str, load_data: bool = False) -> dict:
 
         # Load existing content if file exists
         existing_content = {}
-        pdf_content_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/pdf_content.json"
+        pdf_content_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/pdf_content.json"
 
         try:
             if os.path.exists(pdf_content_path) and os.path.getsize(pdf_content_path) > 0:
@@ -636,7 +673,7 @@ def main(query: str, load_data: bool = False) -> dict:
             print(f"Error reading {pdf_content_path}: {str(e)}, starting fresh")
 
         # Load and process new documents
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/documents.json", "r") as f:
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/documents.json", "r") as f:
             dataset = json.load(f)
 
         # Get titles for new documents and update the content dictionary
@@ -677,7 +714,7 @@ def main(query: str, load_data: bool = False) -> dict:
             
             context_data.append(context_entry)
             
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/context.json", "w") as f:
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/context.json", "w") as f:
             json.dump(context_data, f, indent=4)
         print("Context data saved to context.json")
     
@@ -696,11 +733,11 @@ def main(query: str, load_data: bool = False) -> dict:
         
         # Extract image information from results
         for idx, result in enumerate(results, 1):
-            if 'image_path' in result:
-                response['images'][idx] = result['image_path']
+            if result.get('content_type') == 'image' and 'item' in result and 'path' in result['item']:
+                response['images'][idx] = result['item']['path']
         
         # Save response to file
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/search_results.json", "w") as f:
+        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/search_results.json", "w") as f:
             json.dump(response, f, indent=4)
         
         return response
@@ -713,7 +750,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_data", action="store_true", help="Load data from json file and save to new vector database")
     parser.add_argument("--query", type=str, help="Search query", default="give me the schematic diagram of a PTAT voltage generator")
     args = parser.parse_args()
-    
     main(query=args.query, load_data=args.load_data)
+
         
 

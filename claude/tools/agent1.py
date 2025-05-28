@@ -5,7 +5,7 @@ import re
 import httpx
 import json
 from messages import system_message, system_message_2
-from search1 import main as search_db
+from claude.tools.search import main as search_db
 from pdf2json_chunked import main as pdf2json_chunked
 from fullcontext import main as full_document_search
 from web_scraper import main as web_scraper
