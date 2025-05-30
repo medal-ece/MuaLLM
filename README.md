@@ -15,6 +15,7 @@ The project is organized into different directories for various models:
 - `claude/`: Contains scripts for Claude models
 - `gpt/`: Contains scripts for GPT models
 - `papers/`: Directory to store your PDF files for testing
+- `prompts_to_json/`: Directory to store python script for extracting prompts from *.docx file and write them as desired format in the JSON file
 
 ## How to Run the Project
 
@@ -80,3 +81,37 @@ If you want to use other models (e.g., OpenAI), navigate to their respective dir
 ## Note
 
 Make sure you're in the correct directory (e.g., `claude`) when running the scripts. The paths to the `papers` directory and other resources are relative to the script's location.
+
+## Transferring prompts from *.docx file to *.JSON file
+
+Using these files, there is no need for human resources to work on extraction of prompts from the prompt files and write them on the JSON file manually.
+
+### 1. File Structure
+
+The `prompts_to_json` directory includes one main file:
+* `prompt_extractor.py`: Will extract the *.docx file prompts to a JSON file and the formatted version to the another JSON file.
+
+Also, There should be one other file to get the desired output:
+* `doc.docx`: The unformatted source file for prompts.
+
+At the end of the process two more files would be on the directory:
+* `extracted_queries.json`: The questions still have their #numbers in the JSON structure, which is not desired in the final resulted JSON file. Using this file, we can check if the prompts has completely transferred to the JSON file.
+* `formatted_queries.json`: The final desired JSON file (Questions without numbers).
+
+### 2. Install Dependencies
+There is only one library that should be installed using this pip command:
+```
+pip install python-docx
+```
+
+### 3. The process description
+Using these python scripts, Every paragraph (determined with new line) with "Paper Title" as the starting characters, would be consider as a new "paper" object on the JSON file. Then the program search for every paragraph starting with "P" characters and will add them as question to the the created object in the JSON file until another paragraph with "Paper Title" occurs. Then the program will create another "paper" object and the process will goes on until reading of `doc.docx` file is finished.
+
+This process would be handled by running the `prompt_extractor.py` script whose result will be written in two JSON output files: `extracted_queries.json` & `formatted_queries.json` in the directory.
+
+### 4. Running the script
+After making sure that the `doc.docx` is in the same directory with `prompt_extractor.py`, just run the python script.
+
+### Note:
+* In the `doc.docx` file, the paper title line should start with `Paper Title:`.
+* In the `doc.docx` file, the questions should start with `P<number>:` or similar formats.
