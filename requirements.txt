@@ -23,7 +23,7 @@ voyageai
 cohere
 elasticsearch
 pandas>=1.5.0
-numpy
+numpy>=1.26.0
 PyPDF2>=3.0.0
 cohere
 pytesseract
@@ -38,7 +38,6 @@ lxml>=4.9.0
 opencv-python>=4.8.1
 pytesseract>=0.3.10
 Pillow>=10.0.0
-numpy==1.24.3
 torch>=2.0.0
 transformers>=4.30.0
 matplotlib>=3.7.0
