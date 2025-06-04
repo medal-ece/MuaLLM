@@ -52,11 +52,15 @@ final_query_results/
 gpt/tools/comparision.py
 gpt/tools/cost_analysis_results.json
 gpt/tools/data_collection.py
+gpt/tools/tokens_vs_latency.png
+gpt/tools/tokens_vs_cost.png
 gpt/tools/messages1.py
 gpt/tools/plot_results.py
 claude/tools/comparision.py
 claude/tools/cost_analysis_results.json
 claude/tools/data_collection.py
+claude/tools/tokens_vs_latency.png
+claude/tools/tokens_vs_cost.png
 claude/tools/messages1.py
 claude/tools/plot_results.py
 tokens_vs_latency.png
