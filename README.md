@@ -2,11 +2,7 @@
 
 ## Setup and Usage
 
-1. Clone the repository:
-```bash
-git clone https://github.com/pravallika10473/RAG_research.git
-cd RAG_research
-```
+1. Clone the repository
 
 2. Install dependencies:
 ```bash
@@ -54,8 +50,6 @@ The agent will:
 - Select appropriate tools based on the query
 - Use the hybrid RAG system to retrieve relevant information
 - Generate a comprehensive response
-
-
 
 ## Notes
 
