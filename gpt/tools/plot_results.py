@@ -44,8 +44,8 @@ def plot_tokens_vs_latency(data):
     pages_list = []
     openai_latencies = []
     claude_latencies = []
-    muallm_gpt_latency = data[0]['muallm_gpt_latency']  # Get from first entry since it's constant
-    muallm_claude_latency = data[0]['muallm_claude_latency']  # Get from first entry since it's constant
+    muallm_gpt_latencies = []
+    muallm_claude_latencies = []
     
     for result in data:
         # Convert page count string to number (e.g., '9_pages' -> 9)
@@ -53,14 +53,16 @@ def plot_tokens_vs_latency(data):
         pages_list.append(pages)
         openai_latencies.append(result['openai_latency'])
         claude_latencies.append(result['claude_latency'])
+        muallm_gpt_latencies.append(result['muallm_gpt_latency'])
+        muallm_claude_latencies.append(result['muallm_claude_latency'])
     
     plt.figure(figsize=(10, 6))
     plt.plot(pages_list, openai_latencies, 'b-', linewidth=2, label='GPT-4o')
     plt.plot(pages_list, claude_latencies, 'g-', linewidth=2, label='Claude Sonnet 3.5')
     
-    # Add MuaLLM lines using values from data
-    plt.axhline(y=muallm_gpt_latency, color='r', linestyle='-', linewidth=2, label='MuaLLM GPT-4o')
-    plt.axhline(y=muallm_claude_latency, color='y', linestyle='-', linewidth=2, label='MuaLLM Claude Sonnet 3.5')
+    # Plot MuaLLM lines using actual values from data
+    plt.plot(pages_list, muallm_gpt_latencies, 'r-', linewidth=2, label='MuaLLM GPT-4o')
+    plt.plot(pages_list, muallm_claude_latencies, 'y-', linewidth=2, label='MuaLLM Claude Sonnet 3.5')
     
     # Add labels and title
     plt.xlabel('Number of Pages')

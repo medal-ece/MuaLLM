@@ -49,3 +49,9 @@ agent3_db/
 query_results4/
 finalAgent_db/
 final_query_results/
+comparision.py
+cost_analysis_results.json
+data_collection.py
+messages.py
+plot_results.py
+tokens_vs_latency.png

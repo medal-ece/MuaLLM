@@ -9,8 +9,8 @@
         "muallm_claude_cost": 0.0341,
         "openai_latency": 9.602147102355957,
         "claude_latency": 10.622361812591555,
-        "muallm_gpt_latency": 13.82,
-        "muallm_claude_latency": 15.63
+        "muallm_gpt_latency": 8.01,
+        "muallm_claude_latency": 8.62
     },
     {
         "page_count": "24_pages",
@@ -22,8 +22,8 @@
         "muallm_claude_cost": 0.0341,
         "openai_latency": 12.490983009338379,
         "claude_latency": 13.800081310272219,
-        "muallm_gpt_latency": 13.82,
-        "muallm_claude_latency": 15.63
+        "muallm_gpt_latency": 8.49,
+        "muallm_claude_latency": 9.10
     },
     {
         "page_count": "50_pages",
@@ -35,8 +35,8 @@
         "muallm_claude_cost": 0.0341,
         "openai_latency": 14.64126992225647,
         "claude_latency": 16.165396914482116,
-        "muallm_gpt_latency": 13.82,
-        "muallm_claude_latency": 15.63
+        "muallm_gpt_latency": 8.8,
+        "muallm_claude_latency": 9.41
     },
     {
         "page_count": "100_pages",
@@ -48,7 +48,7 @@
         "muallm_claude_cost": 0.0341,
         "openai_latency": 14.848071098327637,
         "claude_latency": 16.3928782081604,
-        "muallm_gpt_latency": 13.82,
-        "muallm_claude_latency": 15.63
+        "muallm_gpt_latency": 9.11,
+        "muallm_claude_latency": 9.71
     }
 ]
