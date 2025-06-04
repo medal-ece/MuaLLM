@@ -96,7 +96,7 @@ class PDFProcessor:
                 new_path = os.path.join(self.image_dir, new_name)
                 
                 # Ensure relative path in JSON
-                json_path = os.path.join("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/images/", new_name)
+                json_path = os.path.join("../finalAgent_db/images/", new_name)
                 
                 shutil.move(image_file, new_path)
                 images.append({
@@ -180,5 +180,5 @@ async def main(pdf_files, output_path="../finalAgent_db/documents.json", image_d
     print(f"Extracted images have been saved to {image_dir}")
 
 if __name__ == "__main__":
-    pdf_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper7.pdf"
+    pdf_path = "../finalAgent_db/papers/paper7.pdf"
     asyncio.run(main([pdf_path]))

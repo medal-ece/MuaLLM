@@ -76,23 +76,23 @@ def cag_openai(context, question):
 
 def collect_and_save_data():
     # Load PDFs and create contexts # 9 pages
-    pdf_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper1.pdf"
+    pdf_path = "../finalAgent_db/papers/paper1.pdf"
     paper_text1 = extract_text_from_pdf(pdf_path)
 
     # 3 pages
-    pdf_path2 = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper2.pdf"
+    pdf_path2 = "../finalAgent_db/papers/paper2.pdf"
     paper_text2 = extract_text_from_pdf(pdf_path2)
 
     # 11 pages
-    pdf_path3 = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper3.pdf"
+    pdf_path3 = "../finalAgent_db/papers/paper3.pdf"
     paper_text3 = extract_text_from_pdf(pdf_path3)
      
     # 16 pages
-    pdf_path5 = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper5.pdf"
+    pdf_path5 = "../finalAgent_db/papers/paper5.pdf"
     paper_text5 = extract_text_from_pdf(pdf_path5)
 
     # 10 pages
-    pdf_path6 = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/papers/paper6.pdf"
+    pdf_path6 = "../finalAgent_db/papers/paper6.pdf"
     paper_text6 = extract_text_from_pdf(pdf_path6)
 
     # Create contexts

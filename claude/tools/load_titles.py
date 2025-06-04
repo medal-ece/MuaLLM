@@ -7,7 +7,7 @@ def load_titles():
         dict: Dictionary of numbered titles
     """
     try:
-        json_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/agent_db/titles.json"
+        json_path = "../agent_db/titles.json"
         with open(json_path, 'r') as f:
             titles = json.load(f)
         return titles

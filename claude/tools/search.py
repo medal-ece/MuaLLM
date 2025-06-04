@@ -36,7 +36,7 @@ class ContextualVectorDB:
         self.embeddings=[]
         self.metadata=[]
         self.query_cache={}
-        self.db_path= f"/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/base_db/vector_db.pkl"
+        self.db_path= f"../finalAgent_db/base_db/vector_db.pkl"
         self.token_counts={
             'input': 0,
             'output': 0,
@@ -659,7 +659,7 @@ def main(query: str, load_data: bool = False) -> dict:
 
         # Load existing content if file exists
         existing_content = {}
-        pdf_content_path = "/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/pdf_content.json"
+        pdf_content_path = "../finalAgent_db/pdf_content.json"
 
         try:
             if os.path.exists(pdf_content_path) and os.path.getsize(pdf_content_path) > 0:
@@ -673,7 +673,7 @@ def main(query: str, load_data: bool = False) -> dict:
             print(f"Error reading {pdf_content_path}: {str(e)}, starting fresh")
 
         # Load and process new documents
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/documents.json", "r") as f:
+        with open("../finalAgent_db/documents.json", "r") as f:
             dataset = json.load(f)
 
         # Get titles for new documents and update the content dictionary
@@ -714,7 +714,7 @@ def main(query: str, load_data: bool = False) -> dict:
             
             context_data.append(context_entry)
             
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/context.json", "w") as f:
+        with open("../finalAgent_db/context.json", "w") as f:
             json.dump(context_data, f, indent=4)
         print("Context data saved to context.json")
     
@@ -737,7 +737,7 @@ def main(query: str, load_data: bool = False) -> dict:
                 response['images'][idx] = result['item']['path']
         
         # Save response to file
-        with open("/Users/pravallikaabbineni/Desktop/school/RAG_research/claude/finalAgent_db/search_results.json", "w") as f:
+        with open("../finalAgent_db/search_results.json", "w") as f:
             json.dump(response, f, indent=4)
         
         return response
